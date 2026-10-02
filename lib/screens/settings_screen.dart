@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../app_routes.dart';
-import '../app_strings.dart';
 import '../main.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -21,13 +20,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    // =====================================================
-    // LANGUAGE
-    // =====================================================
-
-    final language = LanguageScope.of(context);
-    final strings = AppStrings(language);
-
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
 
@@ -42,7 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         elevation: 0,
 
         title: Text(
-          strings.settings,
+          'Settings',
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w700,
             color: colorScheme.onSurface,
@@ -72,7 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             _sectionTitle(
               context,
-              strings.preferences,
+              'Preferences',
             ),
 
             const SizedBox(height: 10),
@@ -84,11 +76,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSettingCard(
               context: context,
               icon: Icons.notifications_none_rounded,
-              title: strings.notifications,
-
+              title: 'Notifications',
               subtitle: _notifications
-                  ? strings.notificationsEnabled
-                  : strings.notificationsDisabled,
+                  ? 'Notifications enabled'
+                  : 'Notifications disabled',
 
               trailing: Switch(
                 value: _notifications,
@@ -108,12 +99,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSettingCard(
               context: context,
               icon: Icons.dark_mode_outlined,
-
-              title: strings.darkMode,
+              title: 'Dark Mode',
 
               subtitle: themeController.isDarkMode
-                  ? strings.darkModeEnabled
-                  : strings.lightModeEnabled,
+                  ? 'Dark mode enabled'
+                  : 'Light mode enabled',
 
               trailing: Switch(
                 value: themeController.isDarkMode,
@@ -129,8 +119,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                       content: Text(
                         value
-                            ? strings.darkModeEnabled
-                            : strings.lightModeEnabled,
+                            ? 'Dark mode enabled'
+                            : 'Light mode enabled',
                       ),
                     ),
                   );
@@ -145,12 +135,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSettingCard(
               context: context,
               icon: Icons.volume_up_outlined,
-
-              title: strings.soundEffects,
+              title: 'Sound Effects',
 
               subtitle: _soundEffects
-                  ? strings.soundEnabled
-                  : strings.soundDisabled,
+                  ? 'Sound effects enabled'
+                  : 'Sound effects disabled',
 
               trailing: Switch(
                 value: _soundEffects,
@@ -170,12 +159,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSettingCard(
               context: context,
               icon: Icons.alarm_outlined,
-
-              title: strings.learningReminder,
+              title: 'Learning Reminder',
 
               subtitle: _learningReminder
-                  ? strings.reminderEnabled
-                  : strings.reminderDisabled,
+                  ? 'Learning reminder enabled'
+                  : 'Learning reminder disabled',
 
               trailing: Switch(
                 value: _learningReminder,
@@ -196,32 +184,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             _sectionTitle(
               context,
-              strings.general,
+              'General',
             ),
 
             const SizedBox(height: 10),
-
-            // =================================================
-            // LANGUAGE
-            // =================================================
-
-            _buildSettingCard(
-              context: context,
-              icon: Icons.language_rounded,
-
-              title: strings.language,
-
-              subtitle: language.isIndonesian
-                  ? strings.indonesian
-                  : strings.english,
-
-              trailing: Icon(
-                Icons.chevron_right_rounded,
-                color: colorScheme.onSurfaceVariant,
-              ),
-
-              onTap: _showLanguageDialog,
-            ),
 
             // =================================================
             // ABOUT
@@ -230,10 +196,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSettingCard(
               context: context,
               icon: Icons.info_outline_rounded,
-
-              title: strings.about,
-
-              subtitle: strings.version,
+              title: 'About',
+              subtitle: 'Version 1.0.0',
 
               trailing: Icon(
                 Icons.chevron_right_rounded,
@@ -251,7 +215,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             _sectionTitle(
               context,
-              strings.account,
+              'Account',
             ),
 
             const SizedBox(height: 10),
@@ -263,11 +227,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSettingCard(
               context: context,
               icon: Icons.logout_rounded,
-
-              title: strings.logout,
-
-              subtitle: strings.logoutSubtitle,
-
+              title: 'Logout',
+              subtitle: 'Sign out from your account',
               iconColor: const Color(0xFFDC2626),
 
               onTap: () {
@@ -387,106 +348,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // =========================================================
-  // LANGUAGE DIALOG
-  // =========================================================
-
-  void _showLanguageDialog() {
-    final language = LanguageScope.of(context);
-    final strings = AppStrings(language);
-
-    showDialog(
-      context: context,
-
-      builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        final colorScheme = theme.colorScheme;
-
-        return AlertDialog(
-          backgroundColor: colorScheme.surface,
-
-          title: Text(
-            strings.selectLanguage,
-
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-
-            children: [
-              // =================================================
-              // ENGLISH
-              // =================================================
-
-              RadioListTile<String>(
-                value: 'en',
-
-                groupValue: language.locale.languageCode,
-
-                activeColor: colorScheme.primary,
-
-                title: Text(
-                  strings.english,
-
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-
-                onChanged: (value) {
-                  if (value == null) return;
-
-                  language.setLanguage(value);
-
-                  Navigator.pop(dialogContext);
-                },
-              ),
-
-              // =================================================
-              // INDONESIAN
-              // =================================================
-
-              RadioListTile<String>(
-                value: 'id',
-
-                groupValue: language.locale.languageCode,
-
-                activeColor: colorScheme.primary,
-
-                title: Text(
-                  'Bahasa Indonesia',
-
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-
-                onChanged: (value) {
-                  if (value == null) return;
-
-                  language.setLanguage(value);
-
-                  Navigator.pop(dialogContext);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // =========================================================
   // ABOUT DIALOG
   // =========================================================
 
   void _showAboutDialog() {
-    final language = LanguageScope.of(context);
-    final strings = AppStrings(language);
-
     showDialog(
       context: context,
 
@@ -498,7 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           backgroundColor: colorScheme.surface,
 
           title: Text(
-            strings.about,
+            'About',
 
             style: TextStyle(
               color: colorScheme.onSurface,
@@ -513,20 +378,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             CrossAxisAlignment.start,
 
             children: [
-              Text(
+              const Text(
                 'LMS App',
 
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: colorScheme.onSurface,
                 ),
               ),
 
               const SizedBox(height: 8),
 
               Text(
-                strings.aboutDescription,
+                'A simple Learning Management System application built with Flutter.',
 
                 style: TextStyle(
                   color: colorScheme.onSurfaceVariant,
@@ -537,7 +401,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 12),
 
               Text(
-                strings.version,
+                'Version 1.0.0',
 
                 style: TextStyle(
                   color: colorScheme.onSurfaceVariant,
@@ -552,8 +416,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Navigator.pop(dialogContext);
               },
 
-              child: Text(
-                strings.close,
+              child: const Text(
+                'Close',
               ),
             ),
           ],
@@ -567,9 +431,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // =========================================================
 
   void _showLogoutDialog(BuildContext context) {
-    final language = LanguageScope.of(context);
-    final strings = AppStrings(language);
-
     showDialog(
       context: context,
 
@@ -581,7 +442,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           backgroundColor: colorScheme.surface,
 
           title: Text(
-            strings.logout,
+            'Logout',
 
             style: TextStyle(
               color: colorScheme.onSurface,
@@ -590,7 +451,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           content: Text(
-            strings.logoutQuestion,
+            'Are you sure you want to logout?',
 
             style: TextStyle(
               color: colorScheme.onSurfaceVariant,
@@ -603,8 +464,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Navigator.pop(dialogContext);
               },
 
-              child: Text(
-                strings.cancel,
+              child: const Text(
+                'Cancel',
               ),
             ),
 
@@ -619,8 +480,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               },
 
-              child: Text(
-                strings.logout,
+              child: const Text(
+                'Logout',
               ),
             ),
           ],

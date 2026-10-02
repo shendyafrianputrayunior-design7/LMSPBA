@@ -1,146 +1,549 @@
 import 'package:flutter/material.dart';
 
-import '../app_routes.dart';
-import '../app_strings.dart';
-import '../language_controller.dart';
-import '../main.dart';
+import '../widgets/progress_card.dart';
+import '../models/course.dart';
+import '../widgets/course_card.dart';
+import '../screens/courses_screen.dart';
+import '../screens/assignments_screen.dart';
+import '../screens/profile_screen.dart';
+import '../ui/app_spacing.dart';
+import '../ui/layout.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+  State<HomeScreen> createState() => _HomeScreenState();
+}
 
-    final language = LanguageScope.of(context);
-    final strings = AppStrings(language);
+class _HomeScreenState extends State<HomeScreen> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = [
+      _dashboardTab(),
+      const CoursesScreen(),
+      const AssignmentsScreen(),
+      const ProfileScreen(),
+    ];
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
 
       // =====================================================
       // APP BAR
       // =====================================================
 
-      appBar: AppBar(
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
-        surfaceTintColor: Colors.transparent,
+      appBar: _index == 0
+          ? AppBar(
         elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor:
+        Theme.of(context).scaffoldBackgroundColor,
 
-        title: Text(
-          strings.home,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: colorScheme.onSurface,
-          ),
+        titleSpacing: 20,
+
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'LMS',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+
+            Text(
+              'Learning Management System',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
 
         actions: [
           IconButton(
-            tooltip: strings.settings,
+            onPressed: () {},
             icon: const Icon(
-              Icons.settings_outlined,
+              Icons.notifications_none_rounded,
             ),
-            onPressed: () {
-              Navigator.pushNamed(
-                context,
-                AppRoutes.settings,
-              );
-            },
           ),
 
           const SizedBox(width: 8),
         ],
-      ),
+      )
+          : null,
 
       // =====================================================
       // BODY
       // =====================================================
 
-      body: SafeArea(
-        child: ListView(
-          physics: const BouncingScrollPhysics(),
+      body: tabs[_index],
 
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            10,
-            20,
-            30,
+      // =====================================================
+      // BOTTOM NAVIGATION
+      // =====================================================
+
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+
+        onDestinationSelected: (i) {
+          setState(() {
+            _index = i;
+          });
+        },
+
+        height: 68,
+
+        backgroundColor:
+        Theme.of(context).colorScheme.surface,
+
+        indicatorColor:
+        Theme.of(context)
+            .colorScheme
+            .primary
+            .withOpacity(0.12),
+
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(
+              Icons.home_outlined,
+            ),
+            selectedIcon: Icon(
+              Icons.home_rounded,
+            ),
+            label: 'Home',
           ),
+
+          NavigationDestination(
+            icon: Icon(
+              Icons.menu_book_outlined,
+            ),
+            selectedIcon: Icon(
+              Icons.menu_book_rounded,
+            ),
+            label: 'Courses',
+          ),
+
+          NavigationDestination(
+            icon: Icon(
+              Icons.assignment_outlined,
+            ),
+            selectedIcon: Icon(
+              Icons.assignment_rounded,
+            ),
+            label: 'Assignments',
+          ),
+
+          NavigationDestination(
+            icon: Icon(
+              Icons.person_outline_rounded,
+            ),
+            selectedIcon: Icon(
+              Icons.person_rounded,
+            ),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // DASHBOARD
+  // =========================================================
+
+  Widget _dashboardTab() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+
+    final size = MediaQuery.sizeOf(context);
+
+    final double progressListHeight =
+    (size.height * 0.24).clamp(175.0, 205.0);
+
+    final double progressCardWidth =
+    (size.width * 0.76).clamp(245.0, 330.0);
+
+    final horizontalPadding =
+    (size.width * 0.045).clamp(16.0, 28.0);
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+
+      child: AppLayout.centeredConstrained(
+        maxWidth: 720,
+
+        child: Column(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
 
           children: [
 
             // =================================================
-            // WELCOME
+            // WELCOME HEADER
             // =================================================
 
-            Text(
-              strings.welcomeBack,
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: colorScheme.onSurface,
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                8,
+                horizontalPadding,
+                0,
               ),
-            ),
 
-            const SizedBox(height: 6),
+              child: Row(
+                children: [
 
-            Text(
-              language.isIndonesian
-                  ? 'Siap untuk melanjutkan pembelajaran hari ini?'
-                  : 'Ready to continue your learning today?',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                height: 1.5,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                      CrossAxisAlignment.start,
+
+                      children: [
+                        Text(
+                          'Welcome back 👋',
+
+                          style:
+                          textTheme.headlineSmall?.copyWith(
+                            fontWeight:
+                            FontWeight.w800,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+
+                        const SizedBox(height: 5),
+
+                        Text(
+                          'Ready to continue learning today?',
+
+                          style:
+                          textTheme.bodyMedium?.copyWith(
+                            color:
+                            colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // PROFILE AVATAR
+
+                  Container(
+                    width: 48,
+                    height: 48,
+
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+
+                      gradient: LinearGradient(
+                        colors: [
+                          colorScheme.primary,
+                          colorScheme.secondary,
+                        ],
+                      ),
+
+                      boxShadow: [
+                        BoxShadow(
+                          color: colorScheme.primary
+                              .withOpacity(0.20),
+
+                          blurRadius: 12,
+                          offset:
+                          const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+
+                    child: const Icon(
+                      Icons.person_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ],
               ),
             ),
 
             const SizedBox(height: 22),
 
             // =================================================
-            // QUICK ACTIONS
+            // LEARNING OVERVIEW
             // =================================================
 
-            Row(
-              children: [
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+              ),
 
-                Expanded(
-                  child: _buildActionCard(
-                    context: context,
-                    icon: Icons.menu_book_rounded,
-                    title: strings.courses,
-                    subtitle: language.isIndonesian
-                        ? 'Lihat kursus'
-                        : 'View courses',
-                    onTap: () {
-                      Navigator.pushNamed(
-                        context,
-                        AppRoutes.courses,
-                      );
-                    },
+              child: Container(
+                width: double.infinity,
+
+                padding: const EdgeInsets.all(18),
+
+                decoration: BoxDecoration(
+                  borderRadius:
+                  BorderRadius.circular(22),
+
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+
+                    colors: [
+                      colorScheme.primary,
+                      colorScheme.primary
+                          .withOpacity(0.82),
+                    ],
                   ),
+
+                  boxShadow: [
+                    BoxShadow(
+                      color: colorScheme.primary
+                          .withOpacity(0.20),
+
+                      blurRadius: 18,
+                      offset:
+                      const Offset(0, 8),
+                    ),
+                  ],
                 ),
 
-                const SizedBox(width: 12),
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
 
-                Expanded(
-                  child: _buildActionCard(
-                    context: context,
-                    icon: Icons.assignment_outlined,
-                    title: strings.assignments,
-                    subtitle: language.isIndonesian
-                        ? 'Lihat tugas'
-                        : 'View assignments',
-                    onTap: () {
-                      Navigator.pushNamed(
-                        context,
-                        AppRoutes.home,
-                      );
-                    },
-                  ),
+                  children: [
+
+                    Row(
+                      children: [
+
+                        Container(
+                          width: 42,
+                          height: 42,
+
+                          decoration:
+                          BoxDecoration(
+                            color: Colors.white
+                                .withOpacity(0.16),
+
+                            borderRadius:
+                            BorderRadius
+                                .circular(13),
+                          ),
+
+                          child: const Icon(
+                            Icons.school_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
+
+                        const SizedBox(width: 12),
+
+                        Expanded(
+                          child: Text(
+                            'Your Learning Progress',
+
+                            style: textTheme
+                                .titleSmall
+                                ?.copyWith(
+                              color:
+                              Colors.white,
+                              fontWeight:
+                              FontWeight.w700,
+                            ),
+                          ),
+                        ),
+
+                        Text(
+                          '65%',
+
+                          style: textTheme
+                              .titleMedium
+                              ?.copyWith(
+                            color:
+                            Colors.white,
+                            fontWeight:
+                            FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 18),
+
+                    ClipRRect(
+                      borderRadius:
+                      BorderRadius.circular(99),
+
+                      child:
+                      LinearProgressIndicator(
+                        value: 0.65,
+
+                        minHeight: 8,
+
+                        backgroundColor:
+                        Colors.white
+                            .withOpacity(0.18),
+
+                        valueColor:
+                        const AlwaysStoppedAnimation<
+                            Color>(
+                          Colors.white,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Row(
+                      mainAxisAlignment:
+                      MainAxisAlignment
+                          .spaceBetween,
+
+                      children: [
+                        Text(
+                          '3 of 5 lessons completed',
+
+                          style: textTheme
+                              .bodySmall
+                              ?.copyWith(
+                            color: Colors.white
+                                .withOpacity(
+                                0.85),
+                          ),
+                        ),
+
+                        Text(
+                          'Keep going!',
+
+                          style: textTheme
+                              .bodySmall
+                              ?.copyWith(
+                            color: Colors.white,
+                            fontWeight:
+                            FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // =================================================
+            // YOUR COURSES
+            // =================================================
+
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+              ),
+
+              child: Row(
+                children: [
+
+                  Expanded(
+                    child: Text(
+                      'Your Courses',
+
+                      style: textTheme
+                          .titleMedium
+                          ?.copyWith(
+                        fontWeight:
+                        FontWeight.w800,
+                      ),
+                    ),
+                  ),
+
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _index = 1;
+                      });
+                    },
+
+                    child: const Text(
+                      'See All',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // =================================================
+            // COURSE PROGRESS
+            // =================================================
+
+            SizedBox(
+              height: progressListHeight,
+
+              child: ListView(
+                physics:
+                const BouncingScrollPhysics(),
+
+                padding: EdgeInsets.symmetric(
+                  horizontal:
+                  horizontalPadding,
+                ),
+
+                scrollDirection:
+                Axis.horizontal,
+
+                children: [
+
+                  SizedBox(
+                    width: progressCardWidth,
+
+                    child:
+                    const ProgressCard(
+                      title:
+                      'Flutter for Beginners',
+
+                      subtitle:
+                      'Chapter 2 of 12',
+
+                      percent: 0.30,
+                    ),
+                  ),
+
+                  const SizedBox(width: 12),
+
+                  SizedBox(
+                    width: progressCardWidth,
+
+                    child:
+                    const ProgressCard(
+                      title:
+                      'Dart Programming',
+
+                      subtitle:
+                      'Chapter 5 of 10',
+
+                      percent: 0.50,
+                    ),
+                  ),
+
+                  const SizedBox(width: 12),
+                ],
+              ),
             ),
 
             const SizedBox(height: 28),
@@ -149,599 +552,73 @@ class HomeScreen extends StatelessWidget {
             // CONTINUE LEARNING
             // =================================================
 
-            _buildSectionHeader(
-              context,
-              title: strings.continueLearning,
-              actionText: strings.seeAll,
-              onAction: () {
-                Navigator.pushNamed(
-                  context,
-                  AppRoutes.courses,
-                );
-              },
-            ),
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+              ),
 
-            const SizedBox(height: 12),
+              child: Row(
+                children: [
 
-            _buildContinueCard(
-              context: context,
-              strings: strings,
-              language: language,
-            ),
+                  Expanded(
+                    child: Text(
+                      'Continue Learning',
 
-            const SizedBox(height: 28),
+                      style: textTheme
+                          .titleMedium
+                          ?.copyWith(
+                        fontWeight:
+                        FontWeight.w800,
+                      ),
+                    ),
+                  ),
 
-            // =================================================
-            // YOUR PROGRESS
-            // =================================================
+                  Icon(
+                    Icons.auto_awesome_rounded,
 
-            Text(
-              strings.yourProgress,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: colorScheme.onSurface,
+                    size: 20,
+
+                    color:
+                    colorScheme.primary,
+                  ),
+                ],
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
-            _buildProgressCard(
-              context,
-              strings,
-              language,
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding,
+              ),
+
+              child: Column(
+                children: [
+
+                  for (final course
+                  in dummyCourses) ...[
+
+                    CourseCard(
+                      course: course,
+
+                      onTap: () {},
+                    ),
+
+                    const SizedBox(
+                      height: 12,
+                    ),
+                  ],
+                ],
+              ),
             ),
 
-            const SizedBox(height: 28),
+            const SizedBox(height: 20),
 
             // =================================================
-            // PROFILE
+            // BOTTOM SPACE
             // =================================================
 
-            _buildProfileCard(
-              context,
-              strings,
-              language,
-            ),
           ],
-        ),
-      ),
-    );
-  }
-
-  // =========================================================
-  // ACTION CARD
-  // =========================================================
-
-  Widget _buildActionCard({
-    required BuildContext context,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Material(
-      color: colorScheme.surface,
-      borderRadius: BorderRadius.circular(18),
-
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-
-        child: Container(
-          padding: const EdgeInsets.all(15),
-
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-
-            border: Border.all(
-              color: colorScheme.outline,
-            ),
-
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(
-                  theme.brightness == Brightness.dark
-                      ? 0.18
-                      : 0.04,
-                ),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-
-                decoration: BoxDecoration(
-                  color: colorScheme.primary.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-
-                child: Icon(
-                  icon,
-                  color: colorScheme.primary,
-                  size: 21,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-
-              const SizedBox(height: 3),
-
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // =========================================================
-  // SECTION HEADER
-  // =========================================================
-
-  Widget _buildSectionHeader(
-      BuildContext context, {
-        required String title,
-        required String actionText,
-        required VoidCallback onAction,
-      }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            title,
-
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: colorScheme.onSurface,
-            ),
-          ),
-        ),
-
-        TextButton(
-          onPressed: onAction,
-          child: Text(actionText),
-        ),
-      ],
-    );
-  }
-
-  // =========================================================
-  // CONTINUE CARD
-  // =========================================================
-
-  Widget _buildContinueCard({
-    required BuildContext context,
-    required AppStrings strings,
-    required LanguageController language,
-  }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Material(
-      color: colorScheme.surface,
-      borderRadius: BorderRadius.circular(20),
-
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-
-        onTap: () {
-          Navigator.pushNamed(
-            context,
-            AppRoutes.courses,
-          );
-        },
-
-        child: Container(
-          padding: const EdgeInsets.all(16),
-
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-
-            border: Border.all(
-              color: colorScheme.outline,
-            ),
-
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(
-                  theme.brightness == Brightness.dark
-                      ? 0.18
-                      : 0.04,
-                ),
-                blurRadius: 12,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-
-          child: Row(
-            children: [
-
-              Container(
-                width: 62,
-                height: 62,
-
-                decoration: BoxDecoration(
-                  color: colorScheme.primary.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-
-                child: Icon(
-                  Icons.play_arrow_rounded,
-                  color: colorScheme.primary,
-                  size: 30,
-                ),
-              ),
-
-              const SizedBox(width: 14),
-
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
-
-                  children: [
-
-                    Text(
-                      language.isIndonesian
-                          ? 'Flutter untuk Pemula'
-                          : 'Flutter for Beginners',
-
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-
-                      style:
-                      theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    Text(
-                      language.isIndonesian
-                          ? 'Lanjutkan pelajaran terakhir'
-                          : 'Continue your last lesson',
-
-                      style:
-                      theme.textTheme.bodySmall?.copyWith(
-                        color:
-                        colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    ClipRRect(
-                      borderRadius:
-                      BorderRadius.circular(99),
-
-                      child: LinearProgressIndicator(
-                        value: 0.65,
-                        minHeight: 6,
-
-                        backgroundColor:
-                        colorScheme
-                            .surfaceContainerHighest,
-
-                        valueColor:
-                        AlwaysStoppedAnimation<Color>(
-                          colorScheme.primary,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    Text(
-                      '65%',
-
-                      style:
-                      theme.textTheme.labelSmall?.copyWith(
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(width: 8),
-
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // =========================================================
-  // PROGRESS CARD
-  // =========================================================
-
-  Widget _buildProgressCard(
-      BuildContext context,
-      AppStrings strings,
-      LanguageController language,
-      ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-
-        border: Border.all(
-          color: colorScheme.outline,
-        ),
-
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(
-              theme.brightness == Brightness.dark
-                  ? 0.18
-                  : 0.04,
-            ),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-
-        children: [
-
-          Row(
-            children: [
-
-              Container(
-                width: 44,
-                height: 44,
-
-                decoration: BoxDecoration(
-                  color: colorScheme.primary.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-
-                child: Icon(
-                  Icons.insights_rounded,
-                  color: colorScheme.primary,
-                  size: 22,
-                ),
-              ),
-
-              const SizedBox(width: 12),
-
-              Expanded(
-                child: Text(
-                  language.isIndonesian
-                      ? 'Kemajuan Kursus'
-                      : 'Course Progress',
-
-                  style:
-                  theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-              ),
-
-              Text(
-                '65%',
-
-                style:
-                theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: colorScheme.primary,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          ClipRRect(
-            borderRadius: BorderRadius.circular(99),
-
-            child: LinearProgressIndicator(
-              value: 0.65,
-              minHeight: 8,
-
-              backgroundColor:
-              colorScheme.surfaceContainerHighest,
-
-              valueColor:
-              AlwaysStoppedAnimation<Color>(
-                colorScheme.primary,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          Row(
-            mainAxisAlignment:
-            MainAxisAlignment.spaceBetween,
-
-            children: [
-
-              Text(
-                language.isIndonesian
-                    ? '3 dari 5 pelajaran'
-                    : '3 of 5 lessons',
-
-                style:
-                theme.textTheme.bodySmall?.copyWith(
-                  color:
-                  colorScheme.onSurfaceVariant,
-                ),
-              ),
-
-              Text(
-                strings.keepGoing,
-
-                style:
-                theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.primary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // =========================================================
-  // PROFILE CARD
-  // =========================================================
-
-  Widget _buildProfileCard(
-      BuildContext context,
-      AppStrings strings,
-      LanguageController language,
-      ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Material(
-      color: colorScheme.surface,
-      borderRadius: BorderRadius.circular(20),
-
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-
-        onTap: () {
-          Navigator.pushNamed(
-            context,
-            AppRoutes.settings,
-          );
-        },
-
-        child: Container(
-          padding: const EdgeInsets.all(16),
-
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-
-            border: Border.all(
-              color: colorScheme.outline,
-            ),
-          ),
-
-          child: Row(
-            children: [
-
-              Container(
-                width: 48,
-                height: 48,
-
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-
-                  gradient: LinearGradient(
-                    colors: [
-                      colorScheme.primary,
-                      colorScheme.secondary,
-                    ],
-                  ),
-                ),
-
-                child: const Icon(
-                  Icons.person_rounded,
-                  color: Colors.white,
-                  size: 25,
-                ),
-              ),
-
-              const SizedBox(width: 12),
-
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
-
-                  children: [
-
-                    Text(
-                      'Kasun Udara',
-
-                      style:
-                      theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-
-                    const SizedBox(height: 3),
-
-                    Text(
-                      language.isIndonesian
-                          ? 'Lihat pengaturan aplikasi'
-                          : 'View application settings',
-
-                      style:
-                      theme.textTheme.bodySmall?.copyWith(
-                        color:
-                        colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 16,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
         ),
       ),
     );

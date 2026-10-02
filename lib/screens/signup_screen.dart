@@ -1,38 +1,42 @@
 import 'package:flutter/material.dart';
 import '../app_routes.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class SignupScreen extends StatefulWidget {
+  const SignupScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<SignupScreen> createState() => _SignupScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
   bool _loading = false;
   bool _obscurePassword = true;
-  bool _rememberMe = false;
+  bool _obscureConfirmPassword = true;
 
   @override
   void dispose() {
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  Future<void> _signup() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
       _loading = true;
     });
 
-    // Simulasi proses login
+    // Simulasi proses pembuatan akun
     await Future.delayed(
       const Duration(seconds: 1),
     );
@@ -43,24 +47,11 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = false;
     });
 
-    // Login berhasil → Home / Dashboard
-    Navigator.pushReplacementNamed(
-      context,
-      AppRoutes.home,
-    );
-  }
-
-  void _openForgotPassword() {
+    // Setelah akun dibuat → lanjut ke verifikasi email
     Navigator.pushNamed(
       context,
-      AppRoutes.forgotPassword,
-    );
-  }
-
-  void _openSignup() {
-    Navigator.pushNamed(
-      context,
-      AppRoutes.signup,
+      AppRoutes.emailVerification,
+      arguments: _emailController.text.trim(),
     );
   }
 
@@ -70,8 +61,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final textTheme = theme.textTheme;
     final colorScheme = theme.colorScheme;
 
-    final isDark =
-        theme.brightness == Brightness.dark;
+    final isDark = theme.brightness == Brightness.dark;
 
     final size = MediaQuery.sizeOf(context);
 
@@ -83,25 +73,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
-
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(
               maxWidth: 480,
             ),
-
             child: SingleChildScrollView(
               padding: EdgeInsets.symmetric(
                 horizontal: horizontalPadding,
                 vertical: 32,
               ),
-
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   // =====================================
                   // LOGO
                   // =====================================
@@ -111,22 +96,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       width: logoSize + 30,
                       height: logoSize + 30,
                       padding: const EdgeInsets.all(15),
-
                       decoration: BoxDecoration(
-                        color: colorScheme
-                            .surfaceContainerHighest,
-
+                        color:
+                        colorScheme.surfaceContainerHighest,
                         borderRadius:
                         BorderRadius.circular(28),
-
                         border: Border.all(
                           color: colorScheme.outline,
                         ),
-
                         boxShadow: [
                           BoxShadow(
-                            color:
-                            Colors.black.withOpacity(
+                            color: Colors.black.withOpacity(
                               isDark ? 0.20 : 0.06,
                             ),
                             blurRadius: 20,
@@ -134,11 +114,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-
                       child: Image.asset(
                         'assets/images/logo-bgr.png',
-                        semanticLabel:
-                        'LMS App Logo',
+                        semanticLabel: 'LMS App Logo',
                         fit: BoxFit.contain,
                       ),
                     ),
@@ -147,13 +125,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 36),
 
                   // =====================================
-                  // WELCOME TEXT
+                  // TITLE
                   // =====================================
 
                   Text(
-                    'Welcome Back!',
-                    style: textTheme.headlineLarge
-                        ?.copyWith(
+                    'Create Account',
+                    style: textTheme.headlineLarge?.copyWith(
                       color: colorScheme.onSurface,
                       fontWeight: FontWeight.w800,
                     ),
@@ -162,11 +139,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 8),
 
                   Text(
-                    'Login to continue your learning journey',
-                    style: textTheme.bodyMedium
-                        ?.copyWith(
-                      color:
-                      colorScheme.onSurfaceVariant,
+                    'Create your account and start your learning journey',
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
                       fontSize: 15,
                     ),
                   ),
@@ -179,12 +154,50 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   Form(
                     key: _formKey,
-
                     child: Column(
                       crossAxisAlignment:
                       CrossAxisAlignment.start,
-
                       children: [
+                        // =====================================
+                        // FULL NAME
+                        // =====================================
+
+                        Text(
+                          'Full Name',
+                          style:
+                          textTheme.labelLarge?.copyWith(
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: _nameController,
+                          textInputAction:
+                          TextInputAction.next,
+                          decoration: InputDecoration(
+                            hintText: 'Enter your full name',
+                            prefixIcon: Icon(
+                              Icons.person_outline,
+                              color:
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          style: TextStyle(
+                            color: colorScheme.onSurface,
+                          ),
+                          validator: (value) {
+                            if (value == null ||
+                                value.trim().isEmpty) {
+                              return 'Please enter your name';
+                            }
+
+                            return null;
+                          },
+                        ),
+
+                        const SizedBox(height: 20),
 
                         // =====================================
                         // EMAIL
@@ -193,50 +206,37 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text(
                           'Email Address',
                           style:
-                          textTheme.labelLarge
-                              ?.copyWith(
-                            color:
-                            colorScheme.onSurface,
+                          textTheme.labelLarge?.copyWith(
+                            color: colorScheme.onSurface,
                           ),
                         ),
 
                         const SizedBox(height: 8),
 
                         TextFormField(
-                          controller:
-                          _emailController,
-
+                          controller: _emailController,
                           keyboardType:
                           TextInputType.emailAddress,
-
                           textInputAction:
                           TextInputAction.next,
-
-                          decoration:
-                          InputDecoration(
-                            hintText:
-                            'Enter your email',
-
+                          decoration: InputDecoration(
+                            hintText: 'Enter your email',
                             prefixIcon: Icon(
                               Icons.email_outlined,
-                              color: colorScheme
-                                  .onSurfaceVariant,
+                              color:
+                              colorScheme.onSurfaceVariant,
                             ),
                           ),
-
                           style: TextStyle(
-                            color:
-                            colorScheme.onSurface,
+                            color: colorScheme.onSurface,
                           ),
-
                           validator: (value) {
                             if (value == null ||
                                 value.trim().isEmpty) {
                               return 'Please enter your email';
                             }
 
-                            final emailRegex =
-                            RegExp(
+                            final emailRegex = RegExp(
                               r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
                             );
 
@@ -259,60 +259,36 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text(
                           'Password',
                           style:
-                          textTheme.labelLarge
-                              ?.copyWith(
-                            color:
-                            colorScheme.onSurface,
+                          textTheme.labelLarge?.copyWith(
+                            color: colorScheme.onSurface,
                           ),
                         ),
 
                         const SizedBox(height: 8),
 
                         TextFormField(
-                          controller:
-                          _passwordController,
-
-                          obscureText:
-                          _obscurePassword,
-
+                          controller: _passwordController,
+                          obscureText: _obscurePassword,
                           textInputAction:
-                          TextInputAction.done,
-
-                          onFieldSubmitted: (_) {
-                            if (!_loading) {
-                              _submit();
-                            }
-                          },
-
-                          decoration:
-                          InputDecoration(
-                            hintText:
-                            'Enter your password',
-
+                          TextInputAction.next,
+                          decoration: InputDecoration(
+                            hintText: 'Enter your password',
                             prefixIcon: Icon(
                               Icons.lock_outline,
-                              color: colorScheme
-                                  .onSurfaceVariant,
+                              color:
+                              colorScheme.onSurfaceVariant,
                             ),
-
-                            suffixIcon:
-                            IconButton(
-                              tooltip:
-                              _obscurePassword
+                            suffixIcon: IconButton(
+                              tooltip: _obscurePassword
                                   ? 'Show password'
                                   : 'Hide password',
-
                               icon: Icon(
                                 _obscurePassword
-                                    ? Icons
-                                    .visibility_outlined
-                                    : Icons
-                                    .visibility_off_outlined,
-
-                                color: colorScheme
-                                    .onSurfaceVariant,
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                color:
+                                colorScheme.onSurfaceVariant,
                               ),
-
                               onPressed: () {
                                 setState(() {
                                   _obscurePassword =
@@ -321,12 +297,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               },
                             ),
                           ),
-
                           style: TextStyle(
-                            color:
-                            colorScheme.onSurface,
+                            color: colorScheme.onSurface,
                           ),
-
                           validator: (value) {
                             if (value == null ||
                                 value.isEmpty) {
@@ -341,207 +314,133 @@ class _LoginScreenState extends State<LoginScreen> {
                           },
                         ),
 
-                        const SizedBox(height: 12),
-
-                        // =====================================
-                        // REMEMBER ME + FORGOT PASSWORD
-                        // =====================================
-
-                        Row(
-                          children: [
-
-                            Expanded(
-                              child: Row(
-                                children: [
-
-                                  SizedBox(
-                                    width: 24,
-                                    height: 24,
-
-                                    child: Checkbox(
-                                      value:
-                                      _rememberMe,
-
-                                      activeColor:
-                                      colorScheme
-                                          .primary,
-
-                                      checkColor:
-                                      colorScheme
-                                          .onPrimary,
-
-                                      shape:
-                                      RoundedRectangleBorder(
-                                        borderRadius:
-                                        BorderRadius
-                                            .circular(
-                                          5,
-                                        ),
-                                      ),
-
-                                      onChanged:
-                                          (value) {
-                                        setState(() {
-                                          _rememberMe =
-                                              value ??
-                                                  false;
-                                        });
-                                      },
-                                    ),
-                                  ),
-
-                                  const SizedBox(
-                                    width: 8,
-                                  ),
-
-                                  Flexible(
-                                    child: Text(
-                                      'Remember me',
-                                      style: textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                        color: colorScheme
-                                            .onSurface,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            // =====================================
-                            // FORGOT PASSWORD
-                            // =====================================
-
-                            TextButton(
-                              onPressed:
-                              _openForgotPassword,
-
-                              child: const Text(
-                                'Forgot Password?',
-                              ),
-                            ),
-                          ],
-                        ),
-
                         const SizedBox(height: 20),
 
                         // =====================================
-                        // LOGIN BUTTON
+                        // CONFIRM PASSWORD
+                        // =====================================
+
+                        Text(
+                          'Confirm Password',
+                          style:
+                          textTheme.labelLarge?.copyWith(
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller:
+                          _confirmPasswordController,
+                          obscureText:
+                          _obscureConfirmPassword,
+                          textInputAction:
+                          TextInputAction.done,
+                          onFieldSubmitted: (_) {
+                            if (!_loading) {
+                              _signup();
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Confirm your password',
+                            prefixIcon: Icon(
+                              Icons.lock_outline,
+                              color:
+                              colorScheme.onSurfaceVariant,
+                            ),
+                            suffixIcon: IconButton(
+                              tooltip:
+                              _obscureConfirmPassword
+                                  ? 'Show password'
+                                  : 'Hide password',
+                              icon: Icon(
+                                _obscureConfirmPassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                color:
+                                colorScheme.onSurfaceVariant,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscureConfirmPassword =
+                                  !_obscureConfirmPassword;
+                                });
+                              },
+                            ),
+                          ),
+                          style: TextStyle(
+                            color: colorScheme.onSurface,
+                          ),
+                          validator: (value) {
+                            if (value == null ||
+                                value.isEmpty) {
+                              return 'Please confirm your password';
+                            }
+
+                            if (value !=
+                                _passwordController.text) {
+                              return 'Passwords do not match';
+                            }
+
+                            return null;
+                          },
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        // =====================================
+                        // SIGN UP BUTTON
                         // =====================================
 
                         SizedBox(
-                          width:
-                          double.infinity,
+                          width: double.infinity,
                           height: 54,
-
-                          child:
-                          ElevatedButton(
+                          child: ElevatedButton(
                             onPressed:
-                            _loading
-                                ? null
-                                : _submit,
-
-                            child:
-                            AnimatedSwitcher(
+                            _loading ? null : _signup,
+                            child: AnimatedSwitcher(
                               duration:
                               const Duration(
                                 milliseconds: 200,
                               ),
-
                               child: _loading
                                   ? SizedBox(
-                                key:
-                                const ValueKey(
+                                key: const ValueKey(
                                   'loading',
                                 ),
-
                                 width: 22,
                                 height: 22,
-
                                 child:
                                 CircularProgressIndicator(
-                                  strokeWidth:
-                                  2.5,
-
+                                  strokeWidth: 2.5,
                                   color:
-                                  colorScheme
-                                      .onPrimary,
+                                  colorScheme.onPrimary,
                                 ),
                               )
-
                                   : const Text(
-                                'Login',
-                                key:
-                                ValueKey(
-                                  'login',
+                                'Create Account',
+                                key: ValueKey(
+                                  'signup',
                                 ),
                               ),
                             ),
                           ),
                         ),
 
-                        const SizedBox(height: 28),
-
-                        // =====================================
-                        // DIVIDER
-                        // =====================================
-
-                        Row(
-                          children: [
-
-                            Expanded(
-                              child: Divider(
-                                color:
-                                colorScheme
-                                    .outline,
-                              ),
-                            ),
-
-                            Padding(
-                              padding:
-                              const EdgeInsets
-                                  .symmetric(
-                                horizontal: 16,
-                              ),
-
-                              child: Text(
-                                'OR',
-                                style: textTheme
-                                    .labelMedium
-                                    ?.copyWith(
-                                  color: colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-
-                            Expanded(
-                              child: Divider(
-                                color:
-                                colorScheme
-                                    .outline,
-                              ),
-                            ),
-                          ],
-                        ),
-
                         const SizedBox(height: 24),
 
                         // =====================================
-                        // SIGN UP
+                        // BACK TO LOGIN
                         // =====================================
 
                         Center(
                           child: Row(
                             mainAxisAlignment:
-                            MainAxisAlignment
-                                .center,
-
+                            MainAxisAlignment.center,
                             children: [
-
                               Text(
-                                "Don't have an account?",
+                                'Already have an account?',
                                 style: textTheme
                                     .bodyMedium
                                     ?.copyWith(
@@ -549,13 +448,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                       .onSurfaceVariant,
                                 ),
                               ),
-
                               TextButton(
-                                onPressed:
-                                _openSignup,
-
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                },
                                 child: const Text(
-                                  'Sign Up',
+                                  'Login',
                                 ),
                               ),
                             ],
