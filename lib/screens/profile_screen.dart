@@ -10,6 +10,7 @@ import '../ui/app_spacing.dart';
 import '../ui/layout.dart';
 import '../ui/status_colors.dart';
 import 'edit_profile_screen.dart';
+import '../services/cloudinary_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -240,7 +241,80 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     });
 
+    // Upload foto baru ke Cloudinary jika pengguna mengganti foto.
+    if (result['profileImage'] is File) {
+      await _uploadProfilePhoto(
+        result['profileImage'] as File,
+      );
+    }
+
+    // Simpan data profile lainnya ke Firestore.
     await _saveProfileToFirestore();
+  }
+
+  // ===============================================================
+  // UPLOAD PROFILE PHOTO TO CLOUDINARY
+  // ===============================================================
+
+  Future<void> _uploadProfilePhoto(File imageFile) async {
+    if (!mounted) return;
+
+    setState(() {
+      _loadingProfile = true;
+    });
+
+    try {
+      final imageUrl =
+      await CloudinaryService.uploadProfileImage(imageFile);
+
+      if (imageUrl == null || imageUrl.isEmpty) {
+        throw Exception('URL foto dari Cloudinary kosong');
+      }
+
+      // Simpan URL Cloudinary di state.
+      _photoUrl = imageUrl;
+
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set(
+          {
+            'photoUrl': imageUrl,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Foto profil berhasil diperbarui'),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Gagal upload foto profil: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Gagal mengupload foto profil'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingProfile = false;
+        });
+      }
+    }
   }
 
   // ===============================================================
