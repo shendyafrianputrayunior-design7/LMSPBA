@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../app_routes.dart';
@@ -21,8 +23,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // USER PROFILE DATA
   // ===============================================================
 
-  String _username = 'kasunudara';
-  final String _email = 'kasun@gmail.com';
+  String _username = '';
+  String _email = '';
+  String _photoUrl = '';
 
   String _phone = '';
   String _gender = '';
@@ -35,19 +38,138 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   File? _profileImage;
 
-  final _nameController = TextEditingController(
-    text: 'Kasun Udara',
-  );
+  bool _loadingProfile = true;
 
-  final _bioController = TextEditingController(
-    text: 'Final-year Software Engineering student.',
-  );
+  final _nameController = TextEditingController();
+
+  final _bioController = TextEditingController();
+
+  // ===============================================================
+  // INIT
+  // ===============================================================
 
   @override
-  void dispose() {
-    _nameController.dispose();
-    _bioController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  // ===============================================================
+  // LOAD PROFILE FROM FIRESTORE
+  // ===============================================================
+
+  Future<void> _loadProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          _loadingProfile = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      final userRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+
+      final doc = await userRef.get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+
+        _nameController.text =
+            data['name'] ?? user.displayName ?? '';
+
+        _username =
+            data['username'] ?? user.displayName ?? '';
+
+        _email =
+            user.email ?? data['email'] ?? '';
+
+        _photoUrl =
+            data['photoUrl'] ?? user.photoURL ?? '';
+
+        _phone =
+            data['phone'] ?? '';
+
+        _gender =
+            data['gender'] ?? '';
+
+        _birthDate =
+            data['birthDate'] ?? '';
+
+        _address =
+            data['address'] ?? '';
+
+        _school =
+            data['school'] ?? '';
+
+        _className =
+            data['className'] ?? '';
+
+        _major =
+            data['major'] ?? '';
+
+        _nisn =
+            data['nisn'] ?? '';
+
+        _bioController.text =
+            data['bio'] ?? '';
+      } else {
+        // ===========================================================
+        // FIRST LOGIN
+        // Buat data user otomatis di Firestore
+        // ===========================================================
+
+        final name = user.displayName ?? '';
+        final email = user.email ?? '';
+        final photoUrl = user.photoURL ?? '';
+
+        _nameController.text = name;
+        _username = name;
+        _email = email;
+        _photoUrl = photoUrl;
+
+        await userRef.set({
+          'name': name,
+          'username': name,
+          'email': email,
+          'photoUrl': photoUrl,
+          'phone': '',
+          'gender': '',
+          'birthDate': '',
+          'address': '',
+          'school': '',
+          'className': '',
+          'major': '',
+          'nisn': '',
+          'bio': '',
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Gagal mengambil profile: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Gagal mengambil data profile',
+            ),
+          ),
+        );
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _loadingProfile = false;
+      });
+    }
   }
 
   // ===============================================================
@@ -113,9 +235,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
           result['bio'] ?? _bioController.text;
 
       if (result['profileImage'] is File) {
-        _profileImage = result['profileImage'];
+        _profileImage =
+        result['profileImage'];
       }
     });
+
+    await _saveProfileToFirestore();
+  }
+
+  // ===============================================================
+  // SAVE PROFILE TO FIRESTORE
+  // ===============================================================
+
+  Future<void> _saveProfileToFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set(
+        {
+          'name': _nameController.text.trim(),
+          'username': _username.trim(),
+
+          // Email selalu mengambil dari Firebase Auth
+          'email': user.email ?? _email,
+
+          'phone': _phone,
+          'gender': _gender,
+          'birthDate': _birthDate,
+          'address': _address,
+          'school': _school,
+          'className': _className,
+          'major': _major,
+          'nisn': _nisn,
+          'bio': _bioController.text.trim(),
+          'photoUrl': _photoUrl,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(
+          merge: true,
+        ),
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Profile berhasil disimpan',
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint(
+        'Gagal menyimpan profile: $e',
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Gagal menyimpan profile',
+          ),
+        ),
+      );
+    }
   }
 
   // ===============================================================
@@ -129,6 +318,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    // ---------------------------------------------------------------
+    // FOTO DARI GALERI
+    // ---------------------------------------------------------------
+
     if (_profileImage != null) {
       return Container(
         width: 90,
@@ -140,12 +333,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             width: 2,
           ),
           image: DecorationImage(
-            image: FileImage(_profileImage!),
+            image: FileImage(
+              _profileImage!,
+            ),
             fit: BoxFit.cover,
           ),
           boxShadow: [
             BoxShadow(
-              color: colorScheme.primary.withOpacity(0.2),
+              color: colorScheme.primary
+                  .withOpacity(0.2),
               blurRadius: 16,
               offset: const Offset(0, 6),
             ),
@@ -153,6 +349,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       );
     }
+
+    // ---------------------------------------------------------------
+    // FOTO GOOGLE
+    // ---------------------------------------------------------------
+
+    if (_photoUrl.isNotEmpty) {
+      return Container(
+        width: 90,
+        height: 90,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: colorScheme.primary,
+            width: 2,
+          ),
+          image: DecorationImage(
+            image: NetworkImage(
+              _photoUrl,
+            ),
+            fit: BoxFit.cover,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: colorScheme.primary
+                  .withOpacity(0.2),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // DEFAULT AVATAR
+    // ---------------------------------------------------------------
 
     return Container(
       width: 90,
@@ -169,7 +401,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.primary.withOpacity(0.2),
+            color: colorScheme.primary
+                .withOpacity(0.2),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -203,11 +436,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final colorScheme = theme.colorScheme;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(
+        bottom: 10,
+      ),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius:
+        BorderRadius.circular(16),
         border: Border.all(
           color: colorScheme.outline,
         ),
@@ -218,8 +454,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: colorScheme.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
+              color: colorScheme.primary
+                  .withOpacity(0.1),
+              borderRadius:
+              BorderRadius.circular(12),
             ),
             child: Icon(
               icon,
@@ -227,35 +465,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
               size: 21,
             ),
           ),
-
           const SizedBox(width: 12),
-
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+                  style: theme
+                      .textTheme.bodySmall
+                      ?.copyWith(
+                    color: colorScheme
+                        .onSurfaceVariant,
                   ),
                 ),
-
                 const SizedBox(height: 3),
-
                 Text(
-                  value.isEmpty ? '-' : value,
+                  value.isEmpty
+                      ? '-'
+                      : value,
                   maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.onSurface,
+                  overflow:
+                  TextOverflow.ellipsis,
+                  style: theme
+                      .textTheme.bodyMedium
+                      ?.copyWith(
+                    fontWeight:
+                    FontWeight.w600,
+                    color:
+                    colorScheme.onSurface,
                   ),
                 ),
               ],
             ),
           ),
-
           if (locked)
             Icon(
               Icons.lock_outline_rounded,
@@ -283,7 +527,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Text(
         title,
-        style: theme.textTheme.titleLarge?.copyWith(
+        style: theme.textTheme.titleLarge
+            ?.copyWith(
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -297,6 +542,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    if (_loadingProfile) {
+      return Scaffold(
+        backgroundColor:
+        theme.scaffoldBackgroundColor,
+        appBar: const AppBarSimple(
+          title: 'Profile',
+        ),
+        body: const Center(
+          child:
+          CircularProgressIndicator(),
+        ),
+      );
+    }
+
     final textTheme = theme.textTheme;
     final colorScheme = theme.colorScheme;
 
@@ -311,7 +571,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final avatarLetter =
     _nameController.text.isNotEmpty
-        ? _nameController.text[0].toUpperCase()
+        ? _nameController.text[0]
+        .toUpperCase()
         : 'U';
 
     return Scaffold(
@@ -327,9 +588,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const BouncingScrollPhysics(),
 
         padding:
-        AppSpacing.screenPadding(context),
+        AppSpacing.screenPadding(
+          context,
+        ),
 
-        child: AppLayout.centeredConstrained(
+        child:
+        AppLayout.centeredConstrained(
           child: Column(
             crossAxisAlignment:
             CrossAxisAlignment.start,
@@ -343,19 +607,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 width: double.infinity,
                 padding:
                 const EdgeInsets.all(24),
-
-                decoration: BoxDecoration(
-                  color: colorScheme.surface,
+                decoration:
+                BoxDecoration(
+                  color:
+                  colorScheme.surface,
                   borderRadius:
-                  BorderRadius.circular(22),
-
-                  border: Border.all(
-                    color: colorScheme.outline,
+                  BorderRadius.circular(
+                    22,
                   ),
-
+                  border: Border.all(
+                    color:
+                    colorScheme.outline,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(
+                      color:
+                      Colors.black
+                          .withOpacity(
                         theme.brightness ==
                             Brightness.dark
                             ? 0.18
@@ -367,7 +635,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
                 ),
-
                 child: Column(
                   children: [
 
@@ -376,39 +643,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       avatarLetter,
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(
+                      height: 16,
+                    ),
 
                     Text(
                       _nameController.text,
                       textAlign:
                       TextAlign.center,
-                      style:
-                      textTheme.headlineSmall
+                      style: textTheme
+                          .headlineSmall
                           ?.copyWith(
                         fontWeight:
                         FontWeight.w800,
-                        color:
-                        colorScheme.onSurface,
+                        color: colorScheme
+                            .onSurface,
                       ),
                     ),
 
-                    const SizedBox(height: 5),
+                    const SizedBox(
+                      height: 5,
+                    ),
 
                     Text(
                       '@$_username',
                       textAlign:
                       TextAlign.center,
-                      style:
-                      textTheme.bodyMedium
+                      style: textTheme
+                          .bodyMedium
                           ?.copyWith(
-                        color:
-                        colorScheme.primary,
+                        color: colorScheme
+                            .primary,
                         fontWeight:
                         FontWeight.w600,
                       ),
                     ),
 
-                    const SizedBox(height: 6),
+                    const SizedBox(
+                      height: 6,
+                    ),
 
                     Text(
                       _bioController.text,
@@ -417,16 +690,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       maxLines: 2,
                       overflow:
                       TextOverflow.ellipsis,
-                      style:
-                      textTheme.bodyMedium
+                      style: textTheme
+                          .bodyMedium
                           ?.copyWith(
-                        color:
-                        colorScheme
+                        color: colorScheme
                             .onSurfaceVariant,
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(
+                      height: 20,
+                    ),
 
                     SizedBox(
                       width: double.infinity,
@@ -446,7 +720,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(
+                height: 24,
+              ),
 
               // =====================================================
               // PERSONAL INFORMATION
@@ -471,7 +747,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 icon:
                 Icons.alternate_email_rounded,
                 label: 'Username',
-                value: '@$_username',
+                value:
+                '@$_username',
               ),
 
               _buildInfoItem(
@@ -514,7 +791,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 value: _address,
               ),
 
-              const SizedBox(height: 18),
+              const SizedBox(
+                height: 18,
+              ),
 
               // =====================================================
               // EDUCATION
@@ -557,7 +836,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 value: _nisn,
               ),
 
-              const SizedBox(height: 18),
+              const SizedBox(
+                height: 18,
+              ),
 
               // =====================================================
               // ABOUT ME
@@ -577,7 +858,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color:
                   colorScheme.surface,
                   borderRadius:
-                  BorderRadius.circular(18),
+                  BorderRadius.circular(
+                    18,
+                  ),
                   border: Border.all(
                     color:
                     colorScheme.outline,
@@ -587,8 +870,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _bioController.text.isEmpty
                       ? 'No bio added yet.'
                       : _bioController.text,
-                  style:
-                  textTheme.bodyMedium
+                  style: textTheme
+                      .bodyMedium
                       ?.copyWith(
                     height: 1.5,
                     color:
@@ -597,7 +880,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(
+                height: 28,
+              ),
 
               // =====================================================
               // LEARNING OVERVIEW
@@ -605,8 +890,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               Text(
                 'Learning Overview',
-                style:
-                textTheme.titleLarge
+                style: textTheme.titleLarge
                     ?.copyWith(
                   fontWeight:
                   FontWeight.w700,
@@ -615,7 +899,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(
+                height: 12,
+              ),
 
               Row(
                 children: [
@@ -631,7 +917,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
 
-                  const SizedBox(width: 12),
+                  const SizedBox(
+                    width: 12,
+                  ),
 
                   Expanded(
                     child:
@@ -644,7 +932,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
 
-                  const SizedBox(width: 12),
+                  const SizedBox(
+                    width: 12,
+                  ),
 
                   Expanded(
                     child:
@@ -659,7 +949,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(
+                height: 28,
+              ),
 
               // =====================================================
               // COMPLETED COURSES
@@ -667,45 +959,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               Row(
                 mainAxisAlignment:
-                MainAxisAlignment.spaceBetween,
+                MainAxisAlignment
+                    .spaceBetween,
                 children: [
 
                   Expanded(
                     child: Text(
                       'Completed Courses',
-                      style:
-                      textTheme.titleLarge
+                      style: textTheme
+                          .titleLarge
                           ?.copyWith(
                         fontWeight:
                         FontWeight.w700,
-                        color:
-                        colorScheme
+                        color: colorScheme
                             .onSurface,
                       ),
                     ),
                   ),
 
-                  const SizedBox(width: 8),
+                  const SizedBox(
+                    width: 8,
+                  ),
 
                   Container(
                     padding:
-                    const EdgeInsets.symmetric(
+                    const EdgeInsets
+                        .symmetric(
                       horizontal: 10,
                       vertical: 5,
                     ),
                     decoration:
                     BoxDecoration(
-                      color:
-                      colorScheme.primary
+                      color: colorScheme
+                          .primary
                           .withOpacity(0.1),
                       borderRadius:
-                      BorderRadius.circular(20),
+                      BorderRadius.circular(
+                        20,
+                      ),
                     ),
                     child: Text(
                       '${completedCourses.length}',
                       style: TextStyle(
-                        color:
-                        colorScheme.primary,
+                        color: colorScheme
+                            .primary,
                         fontSize: 12,
                         fontWeight:
                         FontWeight.w700,
@@ -715,7 +1012,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(
+                height: 12,
+              ),
 
               ...completedCourses.map(
                     (title) => Container(
@@ -724,13 +1023,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     bottom: 10,
                   ),
                   padding:
-                  const EdgeInsets.all(16),
+                  const EdgeInsets.all(
+                    16,
+                  ),
                   decoration:
                   BoxDecoration(
                     color:
                     colorScheme.surface,
                     borderRadius:
-                    BorderRadius.circular(18),
+                    BorderRadius.circular(
+                      18,
+                    ),
                     border: Border.all(
                       color:
                       colorScheme.outline,
@@ -746,16 +1049,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         BoxDecoration(
                           color: colorScheme
                               .primary
-                              .withOpacity(0.1),
+                              .withOpacity(
+                            0.1,
+                          ),
                           borderRadius:
                           BorderRadius
-                              .circular(14),
+                              .circular(
+                            14,
+                          ),
                         ),
                         child: Icon(
                           Icons
                               .check_circle_rounded,
-                          color:
-                          statusColors
+                          color: statusColors
                               ?.submittedFg ??
                               Colors.green
                                   .shade700,
@@ -763,7 +1069,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
 
-                      const SizedBox(width: 14),
+                      const SizedBox(
+                        width: 14,
+                      ),
 
                       Expanded(
                         child: Column(
@@ -789,7 +1097,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
 
-                            const SizedBox(height: 4),
+                            const SizedBox(
+                              height: 4,
+                            ),
 
                             Text(
                               'Course completed',
@@ -816,7 +1126,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 18),
+              const SizedBox(
+                height: 18,
+              ),
 
               // =====================================================
               // ACCOUNT
@@ -824,8 +1136,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
               Text(
                 'Account',
-                style:
-                textTheme.titleLarge
+                style: textTheme.titleLarge
                     ?.copyWith(
                   fontWeight:
                   FontWeight.w700,
@@ -834,7 +1145,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(
+                height: 12,
+              ),
 
               // SETTINGS
 
@@ -849,7 +1162,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color:
                   colorScheme.surface,
                   borderRadius:
-                  BorderRadius.circular(18),
+                  BorderRadius.circular(
+                    18,
+                  ),
                   border: Border.all(
                     color:
                     colorScheme.outline,
@@ -863,7 +1178,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     );
                   },
                   contentPadding:
-                  const EdgeInsets.symmetric(
+                  const EdgeInsets
+                      .symmetric(
                     horizontal: 16,
                     vertical: 6,
                   ),
@@ -876,7 +1192,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           .primary
                           .withOpacity(0.1),
                       borderRadius:
-                      BorderRadius.circular(14),
+                      BorderRadius.circular(
+                        14,
+                      ),
                     ),
                     child: Icon(
                       Icons
@@ -887,19 +1205,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   title: Text(
                     'Settings',
-                    style:
-                    textTheme.titleSmall
+                    style: textTheme
+                        .titleSmall
                         ?.copyWith(
                       fontWeight:
                       FontWeight.w700,
-                      color:
-                      colorScheme.onSurface,
+                      color: colorScheme
+                          .onSurface,
                     ),
                   ),
                   subtitle: Text(
                     'Manage application preferences',
-                    style:
-                    textTheme.bodySmall
+                    style: textTheme
+                        .bodySmall
                         ?.copyWith(
                       color: colorScheme
                           .onSurfaceVariant,
@@ -914,7 +1232,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
+              // =====================================================
               // LOGOUT
+              // =====================================================
 
               Container(
                 width: double.infinity,
@@ -925,7 +1245,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color:
                   colorScheme.surface,
                   borderRadius:
-                  BorderRadius.circular(18),
+                  BorderRadius.circular(
+                    18,
+                  ),
                   border: Border.all(
                     color:
                     colorScheme.outline,
@@ -946,10 +1268,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           BoxDecoration(
                             color: Colors
                                 .redAccent
-                                .withOpacity(0.1),
+                                .withOpacity(
+                              0.1,
+                            ),
                             borderRadius:
                             BorderRadius
-                                .circular(14),
+                                .circular(
+                              14,
+                            ),
                           ),
                           child:
                           const Icon(
@@ -960,7 +1286,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
 
-                        const SizedBox(width: 12),
+                        const SizedBox(
+                          width: 12,
+                        ),
 
                         Expanded(
                           child: Column(
@@ -975,14 +1303,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     .titleSmall
                                     ?.copyWith(
                                   fontWeight:
-                                  FontWeight.w700,
+                                  FontWeight
+                                      .w700,
                                   color:
                                   colorScheme
                                       .onSurface,
                                 ),
                               ),
 
-                              const SizedBox(height: 3),
+                              const SizedBox(
+                                height: 3,
+                              ),
 
                               Text(
                                 'Sign out from this account',
@@ -1000,7 +1331,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(
+                      height: 16,
+                    ),
 
                     SizedBox(
                       width: double.infinity,
@@ -1054,7 +1387,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(
+                height: 20,
+              ),
             ],
           ),
         ),
@@ -1099,29 +1434,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
             size: 24,
           ),
 
-          const SizedBox(height: 8),
+          const SizedBox(
+            height: 8,
+          ),
 
           Text(
             value,
             style:
-            textTheme.titleLarge?.copyWith(
+            textTheme.titleLarge
+                ?.copyWith(
               fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: colorScheme.onSurface,
+              fontWeight:
+              FontWeight.w800,
+              color:
+              colorScheme.onSurface,
             ),
           ),
 
-          const SizedBox(height: 2),
+          const SizedBox(
+            height: 2,
+          ),
 
           Text(
             label,
-            textAlign: TextAlign.center,
+            textAlign:
+            TextAlign.center,
             style:
-            textTheme.bodySmall?.copyWith(
+            textTheme.bodySmall
+                ?.copyWith(
               fontSize: 11,
-              color:
-              colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
+              color: colorScheme
+                  .onSurfaceVariant,
+              fontWeight:
+              FontWeight.w500,
             ),
           ),
         ],
@@ -1162,8 +1507,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           content: Text(
             'Are you sure you want to logout from this account?',
             style: TextStyle(
-              color:
-              colorScheme.onSurfaceVariant,
+              color: colorScheme
+                  .onSurfaceVariant,
             ),
           ),
 
@@ -1180,12 +1525,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
 
             ElevatedButton.icon(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(
                   dialogContext,
                 );
 
-                Navigator.pushNamedAndRemoveUntil(
+                try {
+                  // Logout Firebase
+                  await FirebaseAuth
+                      .instance
+                      .signOut();
+
+                  // Logout Google Sign-In
+                  await GoogleSignOutHelper
+                      .signOut();
+                } catch (e) {
+                  debugPrint(
+                    'Logout error: $e',
+                  );
+                }
+
+                if (!mounted) return;
+
+                Navigator
+                    .pushNamedAndRemoveUntil(
                   context,
                   AppRoutes.login,
                       (route) => false,
@@ -1204,5 +1567,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       },
     );
+  }
+
+  // ===============================================================
+  // DISPOSE
+  // ===============================================================
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _bioController.dispose();
+    super.dispose();
+  }
+}
+
+// ===============================================================
+// GOOGLE SIGN OUT HELPER
+// ===============================================================
+//
+// Dipisahkan agar ProfileScreen tidak perlu bergantung langsung
+// pada implementasi Google Sign-In di bagian lain aplikasi.
+//
+// Jika GoogleSignIn belum digunakan di project ini untuk logout,
+// helper ini tetap aman dipanggil.
+//
+// ===============================================================
+
+class GoogleSignOutHelper {
+  static Future<void> signOut() async {
+    try {
+      // Firebase Auth sudah melakukan sign out.
+      //
+      // Google Sign-In account akan tetap tersedia untuk pemilihan
+      // akun berikutnya. Tidak perlu memaksa disconnect akun Google.
+    } catch (e) {
+      debugPrint(
+        'Google sign out error: $e',
+      );
+    }
   }
 }

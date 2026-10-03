@@ -221,6 +221,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 10),
 
             // =================================================
+            // SECURITY
+            // =================================================
+
+            _buildSettingCard(
+              context: context,
+              icon: Icons.security_outlined,
+              title: 'Security',
+              subtitle: 'Password and account security',
+
+              trailing: Icon(
+                Icons.chevron_right_rounded,
+                color: colorScheme.onSurfaceVariant,
+              ),
+
+              onTap: () {
+                Navigator.pushNamed(
+                  context,
+                  AppRoutes.security,
+                );
+              },
+            ),
+
+            // =================================================
             // LOGOUT
             // =================================================
 

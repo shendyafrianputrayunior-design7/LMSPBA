@@ -1,4 +1,6 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
 import '../app_routes.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
@@ -16,65 +18,201 @@ class EmailVerificationScreen extends StatefulWidget {
 
 class _EmailVerificationScreenState
     extends State<EmailVerificationScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _codeController = TextEditingController();
-
   bool _loading = false;
+  bool _resending = false;
 
-  // Kode verifikasi untuk simulasi
-  final String _verificationCode = '123456';
+  // ============================================================
+  // CHECK EMAIL VERIFICATION
+  // ============================================================
 
-  @override
-  void dispose() {
-    _codeController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _verifyCode() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    // Cek kode verifikasi
-    if (_codeController.text.trim() != _verificationCode) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Invalid verification code.',
-          ),
-        ),
-      );
-      return;
-    }
+  Future<void> _checkVerification() async {
+    if (_loading) return;
 
     setState(() {
       _loading = true;
     });
 
-    // Simulasi proses verifikasi
-    await Future.delayed(
-      const Duration(seconds: 1),
-    );
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: 'user-not-found',
+          message: 'User tidak ditemukan.',
+        );
+      }
+
+      // Refresh status user dari Firebase
+      await user.reload();
+
+      final refreshedUser =
+          FirebaseAuth.instance.currentUser;
+
+      if (refreshedUser == null) {
+        throw FirebaseAuthException(
+          code: 'user-not-found',
+          message: 'User tidak ditemukan.',
+        );
+      }
+
+      if (!refreshedUser.emailVerified) {
+        if (!mounted) return;
+
+        setState(() {
+          _loading = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Email belum diverifikasi. Silakan buka link verifikasi di email kamu terlebih dahulu.',
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      // ==========================================================
+      // EMAIL SUDAH DIVERIFIKASI
+      // ==========================================================
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+      });
+
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        AppRoutes.home,
+            (route) => false,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.message ?? 'Gagal memeriksa verifikasi email.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Terjadi kesalahan saat memeriksa verifikasi email.',
+          ),
+        ),
+      );
+    }
+  }
+
+  // ============================================================
+  // RESEND VERIFICATION EMAIL
+  // ============================================================
+
+  Future<void> _resendVerificationEmail() async {
+    if (_resending) return;
+
+    setState(() {
+      _resending = true;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: 'user-not-found',
+          message: 'User tidak ditemukan.',
+        );
+      }
+
+      if (user.emailVerified) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Email kamu sudah diverifikasi.',
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      await user.sendEmailVerification();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Email verifikasi telah dikirim ulang.',
+          ),
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      String message =
+          e.message ?? 'Gagal mengirim email verifikasi.';
+
+      if (e.code == 'too-many-requests') {
+        message =
+        'Terlalu banyak permintaan. Silakan tunggu beberapa saat sebelum mencoba lagi.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Gagal mengirim email verifikasi.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _resending = false;
+        });
+      }
+    }
+  }
+
+  // ============================================================
+  // BACK TO LOGIN
+  // ============================================================
+
+  Future<void> _backToLogin() async {
+    await FirebaseAuth.instance.signOut();
 
     if (!mounted) return;
 
-    setState(() {
-      _loading = false;
-    });
-
-    // Verifikasi berhasil → langsung ke Home/Dashboard
     Navigator.pushNamedAndRemoveUntil(
       context,
-      AppRoutes.home,
+      AppRoutes.login,
           (route) => false,
-    );
-  }
-
-  void _resendCode() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'A new verification code has been sent.',
-        ),
-      ),
     );
   }
 
@@ -97,38 +235,47 @@ class _EmailVerificationScreenState
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
+
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(
               maxWidth: 480,
             ),
+
             child: SingleChildScrollView(
               padding: EdgeInsets.symmetric(
                 horizontal: horizontalPadding,
                 vertical: 32,
               ),
+
               child: Column(
                 crossAxisAlignment:
                 CrossAxisAlignment.start,
+
                 children: [
-                  // =====================================
+
+                  // =====================================================
                   // LOGO
-                  // =====================================
+                  // =====================================================
 
                   Center(
                     child: Container(
                       width: logoSize + 30,
                       height: logoSize + 30,
                       padding: const EdgeInsets.all(15),
+
                       decoration: BoxDecoration(
                         color: colorScheme
                             .surfaceContainerHighest,
+
                         borderRadius:
                         BorderRadius.circular(28),
+
                         border: Border.all(
                           color: colorScheme.outline,
                         ),
+
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withOpacity(
@@ -139,6 +286,7 @@ class _EmailVerificationScreenState
                           ),
                         ],
                       ),
+
                       child: Image.asset(
                         'assets/images/logo-bgr.png',
                         semanticLabel:
@@ -150,14 +298,14 @@ class _EmailVerificationScreenState
 
                   const SizedBox(height: 36),
 
-                  // =====================================
+                  // =====================================================
                   // TITLE
-                  // =====================================
+                  // =====================================================
 
                   Text(
                     'Verify Your Email',
-                    style: textTheme.headlineLarge
-                        ?.copyWith(
+                    style:
+                    textTheme.headlineLarge?.copyWith(
                       color: colorScheme.onSurface,
                       fontWeight: FontWeight.w800,
                     ),
@@ -166,42 +314,50 @@ class _EmailVerificationScreenState
                   const SizedBox(height: 8),
 
                   Text(
-                    'We have sent a verification code to your email address.',
-                    style: textTheme.bodyMedium
-                        ?.copyWith(
+                    'We have sent a verification link to your email address.',
+                    style:
+                    textTheme.bodyMedium?.copyWith(
                       color:
                       colorScheme.onSurfaceVariant,
                       fontSize: 15,
                     ),
                   ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
 
-                  // =====================================
+                  // =====================================================
                   // EMAIL
-                  // =====================================
+                  // =====================================================
 
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(14),
+                    padding:
+                    const EdgeInsets.all(14),
+
                     decoration: BoxDecoration(
                       color: colorScheme
                           .surfaceContainerHighest,
+
                       borderRadius:
                       BorderRadius.circular(12),
                     ),
+
                     child: Row(
                       children: [
+
                         Icon(
                           Icons.email_outlined,
                           color:
                           colorScheme.primary,
                         ),
+
                         const SizedBox(width: 12),
+
                         Expanded(
                           child: Text(
                             widget.email,
-                            style: textTheme.bodyMedium
+                            style: textTheme
+                                .bodyMedium
                                 ?.copyWith(
                               color:
                               colorScheme.onSurface,
@@ -214,229 +370,179 @@ class _EmailVerificationScreenState
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 28),
 
-                  // =====================================
-                  // FORM
-                  // =====================================
+                  // =====================================================
+                  // INFORMATION
+                  // =====================================================
 
-                  Form(
-                    key: _formKey,
-                    child: Column(
+                  Container(
+                    width: double.infinity,
+                    padding:
+                    const EdgeInsets.all(16),
+
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary
+                          .withOpacity(0.08),
+
+                      borderRadius:
+                      BorderRadius.circular(14),
+
+                      border: Border.all(
+                        color: colorScheme.primary
+                            .withOpacity(0.20),
+                      ),
+                    ),
+
+                    child: Row(
                       crossAxisAlignment:
                       CrossAxisAlignment.start,
+
                       children: [
-                        Text(
-                          'Verification Code',
-                          style: textTheme.labelLarge
-                              ?.copyWith(
-                            color:
-                            colorScheme.onSurface,
-                          ),
+
+                        Icon(
+                          Icons.mark_email_read_outlined,
+                          color:
+                          colorScheme.primary,
+                          size: 24,
                         ),
 
-                        const SizedBox(height: 8),
+                        const SizedBox(width: 12),
 
-                        TextFormField(
-                          controller:
-                          _codeController,
-                          keyboardType:
-                          TextInputType.number,
-                          textInputAction:
-                          TextInputAction.done,
-                          maxLength: 6,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color:
-                            colorScheme.onSurface,
-                            fontSize: 24,
-                            fontWeight:
-                            FontWeight.w700,
-                            letterSpacing: 8,
-                          ),
-                          decoration:
-                          InputDecoration(
-                            hintText: '000000',
-                            counterText: '',
-                            prefixIcon: Icon(
-                              Icons
-                                  .verified_user_outlined,
+                        Expanded(
+                          child: Text(
+                            'Buka email kamu dan tekan link verifikasi yang dikirim oleh Firebase. Setelah itu kembali ke aplikasi dan tekan tombol "Check Verification".',
+                            style: textTheme
+                                .bodyMedium
+                                ?.copyWith(
                               color: colorScheme
                                   .onSurfaceVariant,
-                            ),
-                          ),
-                          validator: (value) {
-                            if (value == null ||
-                                value.trim().isEmpty) {
-                              return 'Please enter the verification code';
-                            }
-
-                            if (value.trim().length !=
-                                6) {
-                              return 'Code must be 6 digits';
-                            }
-
-                            if (!RegExp(
-                              r'^\d{6}$',
-                            ).hasMatch(
-                                value.trim())) {
-                              return 'Code must contain numbers only';
-                            }
-
-                            return null;
-                          },
-                          onFieldSubmitted: (_) {
-                            if (!_loading) {
-                              _verifyCode();
-                            }
-                          },
-                        ),
-
-                        const SizedBox(height: 24),
-
-                        // =====================================
-                        // VERIFY BUTTON
-                        // =====================================
-
-                        SizedBox(
-                          width: double.infinity,
-                          height: 54,
-                          child: ElevatedButton(
-                            onPressed:
-                            _loading
-                                ? null
-                                : _verifyCode,
-                            child: AnimatedSwitcher(
-                              duration:
-                              const Duration(
-                                milliseconds: 200,
-                              ),
-                              child: _loading
-                                  ? SizedBox(
-                                key: const ValueKey(
-                                  'loading',
-                                ),
-                                width: 22,
-                                height: 22,
-                                child:
-                                CircularProgressIndicator(
-                                  strokeWidth:
-                                  2.5,
-                                  color: colorScheme
-                                      .onPrimary,
-                                ),
-                              )
-                                  : const Text(
-                                'Verify Email',
-                                key: ValueKey(
-                                  'verify',
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        // =====================================
-                        // RESEND CODE
-                        // =====================================
-
-                        Center(
-                          child: Row(
-                            mainAxisAlignment:
-                            MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                "Didn't receive the code?",
-                                style: textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                  color: colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              ),
-                              TextButton(
-                                onPressed:
-                                _resendCode,
-                                child: const Text(
-                                  'Resend Code',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // =====================================
-                        // DEMO INFORMATION
-                        // =====================================
-
-                        Container(
-                          width: double.infinity,
-                          padding:
-                          const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: colorScheme.primary
-                                .withOpacity(0.08),
-                            borderRadius:
-                            BorderRadius.circular(
-                              12,
-                            ),
-                            border: Border.all(
-                              color: colorScheme.primary
-                                  .withOpacity(0.20),
-                            ),
-                          ),
-                          child: Row(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.info_outline,
-                                size: 20,
-                                color: colorScheme
-                                    .primary,
-                              ),
-                              const SizedBox(
-                                width: 10,
-                              ),
-                              Expanded(
-                                child: Text(
-                                  'Demo mode: use verification code 123456.',
-                                  style: textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                    color: colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        // =====================================
-                        // BACK TO LOGIN
-                        // =====================================
-
-                        Center(
-                          child: TextButton.icon(
-                            onPressed: () {
-                              Navigator.pop(context);
-                            },
-                            icon: const Icon(
-                              Icons.arrow_back,
-                            ),
-                            label: const Text(
-                              'Back to Login',
+                              height: 1.5,
                             ),
                           ),
                         ),
                       ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  // =====================================================
+                  // CHECK VERIFICATION
+                  // =====================================================
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+
+                    child: ElevatedButton(
+                      onPressed:
+                      _loading
+                          ? null
+                          : _checkVerification,
+
+                      child: AnimatedSwitcher(
+                        duration:
+                        const Duration(
+                          milliseconds: 200,
+                        ),
+
+                        child: _loading
+                            ? SizedBox(
+                          key:
+                          const ValueKey(
+                            'checking',
+                          ),
+
+                          width: 22,
+                          height: 22,
+
+                          child:
+                          CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color:
+                            colorScheme
+                                .onPrimary,
+                          ),
+                        )
+                            : const Text(
+                          'Check Verification',
+                          key:
+                          ValueKey(
+                            'check',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // =====================================================
+                  // RESEND EMAIL
+                  // =====================================================
+
+                  Center(
+                    child: Row(
+                      mainAxisAlignment:
+                      MainAxisAlignment.center,
+
+                      children: [
+
+                        Text(
+                          "Didn't receive the email?",
+                          style: textTheme
+                              .bodyMedium
+                              ?.copyWith(
+                            color: colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+
+                        TextButton(
+                          onPressed:
+                          _resending
+                              ? null
+                              : _resendVerificationEmail,
+
+                          child: _resending
+                              ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child:
+                            CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                              : const Text(
+                            'Resend',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // =====================================================
+                  // BACK TO LOGIN
+                  // =====================================================
+
+                  Center(
+                    child: TextButton.icon(
+                      onPressed:
+                      _loading ||
+                          _resending
+                          ? null
+                          : _backToLogin,
+
+                      icon: const Icon(
+                        Icons.arrow_back,
+                      ),
+
+                      label: const Text(
+                        'Back to Login',
+                      ),
                     ),
                   ),
                 ],

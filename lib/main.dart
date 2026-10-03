@@ -1,12 +1,25 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import 'app_routes.dart';
+import 'firebase_options.dart';
 import 'theme.dart';
 import 'theme_controller.dart';
 
 final ThemeController themeController = ThemeController();
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Initialize Google Sign-In
+  await GoogleSignIn.instance.initialize();
+
   runApp(const LMSApp());
 }
 

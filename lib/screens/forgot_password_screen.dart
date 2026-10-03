@@ -1,13 +1,16 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
 
   @override
-  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+  State<ForgotPasswordScreen> createState() =>
+      _ForgotPasswordScreenState();
 }
 
-class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+class _ForgotPasswordScreenState
+    extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
 
@@ -26,22 +29,73 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       _loading = true;
     });
 
-    // Simulasi proses pengiriman email
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      final email = _emailController.text.trim();
 
-    if (!mounted) return;
+      await FirebaseAuth.instance.sendPasswordResetEmail(
+        email: email,
+      );
 
-    setState(() {
-      _loading = false;
-    });
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Password reset link has been sent to your email.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Password reset link has been sent to $email.',
+          ),
         ),
-      ),
-    );
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      String message;
+
+      switch (e.code) {
+        case 'invalid-email':
+          message = 'Please enter a valid email address.';
+          break;
+
+        case 'user-not-found':
+          message = 'No account found with this email.';
+          break;
+
+        case 'too-many-requests':
+          message =
+          'Too many requests. Please try again later.';
+          break;
+
+        case 'network-request-failed':
+          message =
+          'Network error. Please check your internet connection.';
+          break;
+
+        default:
+          message =
+          'Failed to send reset link. Please try again.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Something went wrong. Please try again.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -77,7 +131,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               child: Form(
                 key: _formKey,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment:
+                  CrossAxisAlignment.stretch,
                   children: [
                     const SizedBox(height: 20),
 
@@ -125,18 +180,22 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
                     TextFormField(
                       controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
+                      keyboardType:
+                      TextInputType.emailAddress,
+                      textInputAction: TextInputAction.done,
                       decoration: InputDecoration(
                         hintText: 'Enter your email',
                         prefixIcon: const Icon(
                           Icons.email_outlined,
                         ),
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius:
+                          BorderRadius.circular(14),
                         ),
                       ),
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
+                        if (value == null ||
+                            value.trim().isEmpty) {
                           return 'Please enter your email';
                         }
 
@@ -145,6 +204,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         }
 
                         return null;
+                      },
+                      onFieldSubmitted: (_) {
+                        if (!_loading) {
+                          _sendResetLink();
+                        }
                       },
                     ),
 
@@ -156,9 +220,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         onPressed:
                         _loading ? null : _sendResetLink,
                         child: AnimatedSwitcher(
-                          duration: const Duration(
-                            milliseconds: 200,
-                          ),
+                          duration:
+                          const Duration(milliseconds: 200),
                           child: _loading
                               ? const SizedBox(
                             key: ValueKey('loading'),
@@ -180,7 +243,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     const SizedBox(height: 16),
 
                     TextButton(
-                      onPressed: () {
+                      onPressed: _loading
+                          ? null
+                          : () {
                         Navigator.pop(context);
                       },
                       child: const Text(

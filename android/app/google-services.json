@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "472718972665",
+    "project_id": "aplikasi-sekolah-db9f6",
+    "storage_bucket": "aplikasi-sekolah-db9f6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:472718972665:android:ef7898d8ad0b96c9c33428",
+        "android_client_info": {
+          "package_name": "com.example.flutter_lms_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "472718972665-4cr72u0uca8bj8jvi152eqq5lg97b3es.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.flutter_lms_app",
+            "certificate_hash": "b987888a922cf03513256a12219435bd7f052c25"
+          }
+        },
+        {
+          "client_id": "472718972665-nmds13phssclaepvr3trbgjj0gh5u87k.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyFGBD0Ww5dYzJIv9BhXjbaRemBKPuCgE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "472718972665-nmds13phssclaepvr3trbgjj0gh5u87k.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "472718972665-idd9ioss1r559kpckn2qrr867cqta2q4.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.flutterLmsApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
