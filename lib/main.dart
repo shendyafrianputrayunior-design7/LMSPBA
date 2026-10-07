@@ -12,12 +12,10 @@ final ThemeController themeController = ThemeController();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Initialize Google Sign-In
   await GoogleSignIn.instance.initialize();
 
   runApp(const LMSApp());
@@ -33,7 +31,6 @@ class LMSApp extends StatelessWidget {
       builder: (context, child) {
         return MaterialApp(
           title: 'LMS App',
-
           debugShowCheckedModeBanner: false,
 
           theme: AppTheme.light(),

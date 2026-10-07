@@ -5,6 +5,7 @@ class Course {
   final String image;
   final String description;
   final int lessons;
+
   Course({
     required this.id,
     required this.title,
@@ -13,31 +14,44 @@ class Course {
     required this.description,
     required this.lessons,
   });
-}
 
-final List<Course> dummyCourses = [
-  Course(
-    id: 'c1',
-    title: 'Flutter for Beginners',
-    instructor: 'Donald Trump',
-    image: 'assets/images/onboarding1.png',
-    description: 'Learn the basics of Flutter and build beautiful UIs.',
-    lessons: 12,
-  ),
-  Course(
-    id: 'c2',
-    title: 'State Management Guide',
-    instructor: 'Joe Biden',
-    image: 'assets/images/onboarding2.png',
-    description: 'Understand setState and simple state management.',
-    lessons: 8,
-  ),
-  Course(
-    id: 'c3',
-    title: 'Dart Programming Deep-dive',
-    instructor: 'Stephen Hawking',
-    image: 'assets/images/onboarding3.png',
-    description: 'Improve your Dart skills with practical examples.',
-    lessons: 10,
-  ),
-];
+  // =============================================================
+  // FIRESTORE → COURSE
+  // =============================================================
+
+  factory Course.fromFirestore(
+      String id,
+      Map<String, dynamic> data,
+      ) {
+    return Course(
+      id: id,
+      title: (data['title'] ?? '').toString(),
+      instructor: (data['instructor'] ?? '').toString(),
+      image: (data['image'] ?? '').toString(),
+      description: (data['description'] ?? '').toString(),
+      lessons: data['lessons'] is int
+          ? data['lessons'] as int
+          : int.tryParse(
+        (data['lessons'] ?? '0').toString(),
+      ) ??
+          0,
+    );
+  }
+
+  // =============================================================
+  // COURSE → FIRESTORE
+  // =============================================================
+
+  Map<String, dynamic> toFirestore({
+    required String classId,
+  }) {
+    return {
+      'classId': classId,
+      'title': title,
+      'instructor': instructor,
+      'image': image,
+      'description': description,
+      'lessons': lessons,
+    };
+  }
+}

@@ -1,1 +1,33 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"aplikasi-sekolah-db9f6","appId":"1:472718972665:android:ef7898d8ad0b96c9c33428","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"aplikasi-sekolah-db9f6","configurations":{"android":"1:472718972665:android:ef7898d8ad0b96c9c33428","ios":"1:472718972665:ios:a39e599d54f2a768c33428","macos":"1:472718972665:ios:a39e599d54f2a768c33428","web":"1:472718972665:web:426db7b86d306785c33428","windows":"1:472718972665:web:f40bfd73cb977b09c33428"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "aplikasi-sekolah-db9f6",
+          "appId": "1:472718972665:android:ef7898d8ad0b96c9c33428",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "aplikasi-sekolah-db9f6",
+          "configurations": {
+            "android": "1:472718972665:android:ef7898d8ad0b96c9c33428",
+            "ios": "1:472718972665:ios:a39e599d54f2a768c33428",
+            "macos": "1:472718972665:ios:a39e599d54f2a768c33428",
+            "web": "1:472718972665:web:426db7b86d306785c33428",
+            "windows": "1:472718972665:web:f40bfd73cb977b09c33428"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}

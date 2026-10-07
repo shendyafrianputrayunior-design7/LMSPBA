@@ -41,6 +41,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final userDoc = await userRef.get();
 
+    // Hanya membuat profile jika benar-benar belum ada.
+    // Profile yang sudah ada tidak akan ditimpa.
     if (!userDoc.exists) {
       await userRef.set({
         'name': user.displayName ?? '',
@@ -56,9 +58,103 @@ class _LoginScreenState extends State<LoginScreen> {
         'major': '',
         'nisn': '',
         'bio': '',
+        'role': 'student',
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
+    }
+  }
+
+  // ============================================================
+  // LOGIN BERDASARKAN ROLE
+  // ============================================================
+
+  Future<void> _loginBasedOnRole(User user) async {
+    try {
+      final userRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+
+      final userDoc = await userRef.get();
+
+      // ----------------------------------------------------------
+      // PROFILE BELUM ADA
+      // ----------------------------------------------------------
+
+      if (!userDoc.exists) {
+        await _ensureUserProfile(user);
+
+        if (!mounted) return;
+
+        _goToHome();
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // AMBIL ROLE
+      // ----------------------------------------------------------
+
+      final data = userDoc.data();
+
+      final role = (data?['role'] ?? 'student')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      debugPrint('========================================');
+      debugPrint('LOGIN USER');
+      debugPrint('UID   : ${user.uid}');
+      debugPrint('EMAIL : ${user.email}');
+      debugPrint('ROLE  : $role');
+      debugPrint('========================================');
+
+      if (!mounted) return;
+
+      // ----------------------------------------------------------
+      // ADMIN
+      // ----------------------------------------------------------
+
+      if (role == 'admin') {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.admin,
+              (route) => false,
+        );
+
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // TEACHER / GURU
+      // ----------------------------------------------------------
+
+      if (role == 'teacher') {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.teacher,
+              (route) => false,
+        );
+
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // STUDENT
+      // ----------------------------------------------------------
+
+      _goToHome();
+    } catch (e) {
+      debugPrint('Error cek role: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Gagal membaca data akun: $e',
+          ),
+        ),
+      );
     }
   }
 
@@ -81,7 +177,13 @@ class _LoginScreenState extends State<LoginScreen> {
   // ============================================================
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    if (_loading || _googleLoading) {
+      return;
+    }
 
     setState(() {
       _loading = true;
@@ -91,8 +193,12 @@ class _LoginScreenState extends State<LoginScreen> {
       final email = _emailController.text.trim();
       final password = _passwordController.text;
 
-      final credential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
+      // ----------------------------------------------------------
+      // FIREBASE LOGIN
+      // ----------------------------------------------------------
+
+      final credential =
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -105,9 +211,11 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      await _ensureUserProfile(user);
+      // ----------------------------------------------------------
+      // CEK ROLE
+      // ----------------------------------------------------------
 
-      _goToHome();
+      await _loginBasedOnRole(user);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
@@ -120,8 +228,7 @@ class _LoginScreenState extends State<LoginScreen> {
           break;
 
         case 'user-not-found':
-          message =
-          'Akun dengan email tersebut tidak ditemukan.';
+          message = 'Akun dengan email tersebut tidak ditemukan.';
           break;
 
         case 'invalid-email':
@@ -138,13 +245,11 @@ class _LoginScreenState extends State<LoginScreen> {
           break;
 
         case 'network-request-failed':
-          message =
-          'Periksa koneksi internet kamu.';
+          message = 'Periksa koneksi internet kamu.';
           break;
 
         default:
-          message =
-              e.message ?? 'Login gagal. Silakan coba lagi.';
+          message = e.message ?? 'Login gagal. Silakan coba lagi.';
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -156,9 +261,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Terjadi kesalahan saat login.',
+            'Terjadi kesalahan saat login: $e',
           ),
         ),
       );
@@ -176,28 +281,33 @@ class _LoginScreenState extends State<LoginScreen> {
   // ============================================================
 
   Future<void> _signInWithGoogle() async {
-    if (_googleLoading || _loading) return;
+    if (_googleLoading || _loading) {
+      return;
+    }
 
     setState(() {
       _googleLoading = true;
     });
 
     try {
+      // ----------------------------------------------------------
+      // GOOGLE SIGN IN
+      // ----------------------------------------------------------
+
       final GoogleSignInAccount googleUser =
       await GoogleSignIn.instance.authenticate();
 
       final GoogleSignInAuthentication googleAuth =
           googleUser.authentication;
 
-      final googleCredential =
-      GoogleAuthProvider.credential(
+      final googleCredential = GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
       );
 
       try {
-        // ========================================================
+        // --------------------------------------------------------
         // NORMAL GOOGLE LOGIN
-        // ========================================================
+        // --------------------------------------------------------
 
         final userCredential =
         await FirebaseAuth.instance.signInWithCredential(
@@ -212,16 +322,14 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         }
 
-        await _ensureUserProfile(user);
-
-        _goToHome();
+        // Cek role setelah Google Login.
+        await _loginBasedOnRole(user);
       } on FirebaseAuthException catch (e) {
-        // ========================================================
+        // --------------------------------------------------------
         // EMAIL SUDAH ADA DENGAN EMAIL/PASSWORD
-        // ========================================================
+        // --------------------------------------------------------
 
-        if (e.code ==
-            'account-exists-with-different-credential') {
+        if (e.code == 'account-exists-with-different-credential') {
           await _handleGoogleAccountLinking(
             googleCredential,
             googleUser.email,
@@ -233,8 +341,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } on GoogleSignInException catch (e) {
       if (!mounted) return;
 
-      if (e.code ==
-          GoogleSignInExceptionCode.canceled) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
         return;
       }
 
@@ -258,18 +365,15 @@ class _LoginScreenState extends State<LoginScreen> {
           break;
 
         case 'network-request-failed':
-          message =
-          'Periksa koneksi internet kamu.';
+          message = 'Periksa koneksi internet kamu.';
           break;
 
         case 'user-disabled':
-          message =
-          'Akun ini telah dinonaktifkan.';
+          message = 'Akun ini telah dinonaktifkan.';
           break;
 
         default:
-          message =
-              e.message ?? 'Google Login gagal.';
+          message = e.message ?? 'Google Login gagal.';
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -281,9 +385,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Terjadi kesalahan saat Login dengan Google.',
+            'Terjadi kesalahan saat Login dengan Google: $e',
           ),
         ),
       );
@@ -322,8 +426,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     'Email $googleEmail sudah terdaftar '
@@ -352,14 +455,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         onPressed: () {
                           setDialogState(() {
-                            obscurePassword =
-                            !obscurePassword;
+                            obscurePassword = !obscurePassword;
                           });
                         },
                       ),
                       border: OutlineInputBorder(
-                        borderRadius:
-                        BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                   ),
@@ -374,8 +475,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    final value =
-                        passwordController.text;
+                    final value = passwordController.text;
 
                     if (value.isNotEmpty) {
                       Navigator.pop(
@@ -400,13 +500,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     try {
-      // ========================================================
-      // LOGIN DENGAN EMAIL/PASSWORD
-      // ========================================================
+      // ----------------------------------------------------------
+      // LOGIN EMAIL/PASSWORD
+      // ----------------------------------------------------------
 
       final emailCredential =
-      await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: googleEmail,
         password: password,
       );
@@ -419,15 +518,18 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      // ========================================================
+      // ----------------------------------------------------------
       // LINK GOOGLE KE AKUN YANG SAMA
-      // ========================================================
+      // ----------------------------------------------------------
 
       await user.linkWithCredential(
         googleCredential,
       );
 
-      // Refresh user
+      // ----------------------------------------------------------
+      // REFRESH USER
+      // ----------------------------------------------------------
+
       await user.reload();
 
       final updatedUser =
@@ -439,8 +541,6 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      await _ensureUserProfile(updatedUser);
-
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -451,7 +551,11 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
 
-      _goToHome();
+      // ----------------------------------------------------------
+      // CEK ROLE
+      // ----------------------------------------------------------
+
+      await _loginBasedOnRole(updatedUser);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
@@ -481,8 +585,7 @@ class _LoginScreenState extends State<LoginScreen> {
           break;
 
         case 'network-request-failed':
-          message =
-          'Periksa koneksi internet kamu.';
+          message = 'Periksa koneksi internet kamu.';
           break;
 
         default:
@@ -500,9 +603,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Gagal menghubungkan akun Google.',
+            'Gagal menghubungkan akun Google: $e',
           ),
         ),
       );
@@ -589,8 +692,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black
-                                .withOpacity(
+                            color: Colors.black.withOpacity(
                               isDark ? 0.20 : 0.06,
                             ),
                             blurRadius: 20,
@@ -670,8 +772,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller:
                           _emailController,
                           keyboardType:
-                          TextInputType
-                              .emailAddress,
+                          TextInputType.emailAddress,
                           textInputAction:
                           TextInputAction.next,
                           decoration:
@@ -690,9 +791,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           validator: (value) {
                             if (value == null ||
-                                value
-                                    .trim()
-                                    .isEmpty) {
+                                value.trim().isEmpty) {
                               return 'Please enter your email';
                             }
 
@@ -701,8 +800,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
                             );
 
-                            if (!emailRegex
-                                .hasMatch(
+                            if (!emailRegex.hasMatch(
                               value.trim(),
                             )) {
                               return 'Enter a valid email address';
@@ -820,11 +918,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                       RoundedRectangleBorder(
                                         borderRadius:
                                         BorderRadius
-                                            .circular(
-                                          5,
-                                        ),
+                                            .circular(5),
                                       ),
-                                      onChanged: (_loading ||
+                                      onChanged:
+                                      (_loading ||
                                           _googleLoading)
                                           ? null
                                           : (value) {
@@ -837,14 +934,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                   ),
                                   const SizedBox(
-                                      width: 8),
+                                    width: 8,
+                                  ),
                                   Flexible(
                                     child: Text(
                                       'Remember me',
                                       style: textTheme
                                           .bodyMedium
                                           ?.copyWith(
-                                        color: colorScheme
+                                        color:
+                                        colorScheme
                                             .onSurface,
                                       ),
                                     ),
@@ -889,7 +988,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               child: _loading
                                   ? SizedBox(
-                                key: const ValueKey(
+                                key:
+                                const ValueKey(
                                   'loading',
                                 ),
                                 width: 22,
@@ -898,13 +998,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                 CircularProgressIndicator(
                                   strokeWidth:
                                   2.5,
-                                  color: colorScheme
+                                  color:
+                                  colorScheme
                                       .onPrimary,
                                 ),
                               )
                                   : const Text(
                                 'Login',
-                                key: ValueKey(
+                                key:
+                                ValueKey(
                                   'login',
                                 ),
                               ),
@@ -937,7 +1039,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 style: textTheme
                                     .labelMedium
                                     ?.copyWith(
-                                  color: colorScheme
+                                  color:
+                                  colorScheme
                                       .onSurfaceVariant,
                                 ),
                               ),
@@ -978,9 +1081,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               RoundedRectangleBorder(
                                 borderRadius:
                                 BorderRadius
-                                    .circular(
-                                  14,
-                                ),
+                                    .circular(14),
                               ),
                             ),
                             child:
@@ -989,9 +1090,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               const Duration(
                                 milliseconds: 200,
                               ),
-                              child: _googleLoading
+                              child:
+                              _googleLoading
                                   ? SizedBox(
-                                key: const ValueKey(
+                                key:
+                                const ValueKey(
                                   'google_loading',
                                 ),
                                 width: 22,
@@ -1000,7 +1103,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 CircularProgressIndicator(
                                   strokeWidth:
                                   2.5,
-                                  color: colorScheme
+                                  color:
+                                  colorScheme
                                       .primary,
                                 ),
                               )
@@ -1024,12 +1128,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                   ),
                                   const SizedBox(
-                                      width: 12),
+                                    width: 12,
+                                  ),
                                   Text(
                                     'Continue with Google',
                                     style:
                                     TextStyle(
-                                      color: colorScheme
+                                      color:
+                                      colorScheme
                                           .onSurface,
                                       fontWeight:
                                       FontWeight
@@ -1059,7 +1165,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 style: textTheme
                                     .bodyMedium
                                     ?.copyWith(
-                                  color: colorScheme
+                                  color:
+                                  colorScheme
                                       .onSurfaceVariant,
                                 ),
                               ),

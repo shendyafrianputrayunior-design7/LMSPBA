@@ -1,0 +1,1006 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+class MaterialScreen extends StatefulWidget {
+  const MaterialScreen({super.key});
+
+  @override
+  State<MaterialScreen> createState() => _MaterialScreenState();
+}
+
+class _MaterialScreenState extends State<MaterialScreen> {
+  bool _loading = true;
+  String? _errorMessage;
+
+  String _classId = '';
+  String _className = '';
+
+  List<Map<String, dynamic>> _materials = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMaterials();
+  }
+
+  // =========================================================
+  // LOAD MATERIALS
+  // =========================================================
+
+  Future<void> _loadMaterials() async {
+    if (!mounted) return;
+
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        throw Exception('Akun siswa tidak ditemukan.');
+      }
+
+      // =====================================================
+      // GET USER
+      // =====================================================
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final userData = userDoc.data() ?? <String, dynamic>{};
+
+      final classId = userData['classId']?.toString() ?? '';
+
+      if (classId.isEmpty) {
+        throw Exception('Data kelas siswa belum tersedia.');
+      }
+
+      // =====================================================
+      // GET CLASS
+      // =====================================================
+
+      String className = classId;
+
+      final classDoc = await FirebaseFirestore.instance
+          .collection('classes')
+          .doc(classId)
+          .get();
+
+      if (classDoc.exists) {
+        final classData =
+            classDoc.data() ?? <String, dynamic>{};
+
+        className = classData['name']?.toString() ?? classId;
+      }
+
+      // =====================================================
+      // GET MATERIALS
+      // =====================================================
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('materials')
+          .where(
+        'classId',
+        isEqualTo: classId,
+      )
+          .get();
+
+      final materials = <Map<String, dynamic>>[];
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        String teacherName = 'Guru';
+
+        final teacherId = data['teacherId']?.toString() ?? '';
+
+        // ===================================================
+        // GET TEACHER
+        // ===================================================
+
+        if (teacherId.isNotEmpty) {
+          final teacherDoc = await FirebaseFirestore.instance
+              .collection('teachers')
+              .doc(teacherId)
+              .get();
+
+          if (teacherDoc.exists) {
+            final teacherData =
+                teacherDoc.data() ?? <String, dynamic>{};
+
+            teacherName =
+                teacherData['name']?.toString() ?? 'Guru';
+          }
+        }
+
+        materials.add({
+          'id': doc.id,
+          'subject': data['subject']?.toString() ?? '-',
+          'title': data['title']?.toString() ?? '-',
+          'description':
+          data['description']?.toString() ?? '-',
+          'type': data['type']?.toString() ?? 'Materi',
+          'fileUrl': data['fileUrl']?.toString() ?? '',
+          'teacher': teacherName,
+        });
+      }
+
+      // =====================================================
+      // UPDATE STATE
+      // =====================================================
+
+      if (!mounted) return;
+
+      setState(() {
+        _classId = classId;
+        _className = className;
+        _materials = materials;
+        _loading = false;
+        _errorMessage = null;
+      });
+    } catch (e) {
+      debugPrint('Gagal mengambil materi: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _errorMessage =
+            e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: theme.scaffoldBackgroundColor,
+        title: const Text(
+          'Materials',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: _loading ? null : _loadMaterials,
+            icon: const Icon(
+              Icons.refresh_rounded,
+            ),
+            tooltip: 'Refresh',
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: _buildBody(
+          context,
+          colorScheme,
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // BODY
+  // =========================================================
+
+  Widget _buildBody(
+      BuildContext context,
+      ColorScheme colorScheme,
+      ) {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return _buildErrorState(
+        context,
+        _errorMessage!,
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadMaterials,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(
+          20,
+          8,
+          20,
+          30,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // =================================================
+            // HEADER
+            // =================================================
+
+            Text(
+              'Materi Pembelajaran',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+
+            const SizedBox(height: 6),
+
+            Text(
+              _className.isNotEmpty
+                  ? 'Materi pembelajaran untuk kelas $_className.'
+                  : 'Pelajari materi pembelajaran dari guru.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // =================================================
+            // SUMMARY
+            // =================================================
+
+            _buildSummaryCard(
+              context,
+              colorScheme,
+            ),
+
+            const SizedBox(height: 26),
+
+            Text(
+              'Daftar Materi',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // =================================================
+            // EMPTY
+            // =================================================
+
+            if (_materials.isEmpty)
+              _buildEmptyState(context),
+
+            // =================================================
+            // LIST
+            // =================================================
+
+            ..._materials.map(
+                  (material) => _buildMaterialCard(
+                context,
+                material,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // SUMMARY CARD
+  // =========================================================
+
+  Widget _buildSummaryCard(
+      BuildContext context,
+      ColorScheme colorScheme,
+      ) {
+    final theme = Theme.of(context);
+
+    final pdfCount = _materials.where((item) {
+      return item['type']
+          .toString()
+          .toLowerCase() ==
+          'pdf';
+    }).length;
+
+    final otherCount = _materials.length - pdfCount;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.primary,
+            colorScheme.primary.withOpacity(0.78),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.primary.withOpacity(0.20),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(
+                  Icons.menu_book_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Materi Tersedia',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${_materials.length} materi pembelajaran',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withOpacity(0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          Row(
+            children: [
+              Expanded(
+                child: _buildSummaryItem(
+                  'Total',
+                  _materials.length,
+                ),
+              ),
+              Expanded(
+                child: _buildSummaryItem(
+                  'PDF',
+                  pdfCount,
+                ),
+              ),
+              Expanded(
+                child: _buildSummaryItem(
+                  'Lainnya',
+                  otherCount,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // SUMMARY ITEM
+  // =========================================================
+
+  Widget _buildSummaryItem(
+      String label,
+      int value,
+      ) {
+    return Column(
+      children: [
+        Text(
+          value.toString(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.80),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // =========================================================
+  // MATERIAL CARD
+  // =========================================================
+
+  Widget _buildMaterialCard(
+      BuildContext context,
+      Map<String, dynamic> material,
+      ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    final type = material['type']?.toString() ?? 'Materi';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () {
+        _showMaterialDetail(
+          context,
+          material,
+        );
+      },
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: colorScheme.outline.withOpacity(0.40),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // =================================================
+            // ICON
+            // =================================================
+
+            Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                color: colorScheme.primary.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                _getMaterialIcon(type),
+                color: colorScheme.primary,
+                size: 27,
+              ),
+            ),
+
+            const SizedBox(width: 13),
+
+            // =================================================
+            // CONTENT
+            // =================================================
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          material['title']?.toString() ?? '-',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                          theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(width: 8),
+
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                          colorScheme.primary.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          type,
+                          style: TextStyle(
+                            color: colorScheme.primary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 7),
+
+                  Text(
+                    material['subject']?.toString() ?? '-',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+
+                  const SizedBox(height: 5),
+
+                  Text(
+                    material['description']?.toString() ?? '-',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline_rounded,
+                        size: 15,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          material['teacher']?.toString() ?? 'Guru',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        size: 14,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // MATERIAL DETAIL
+  // =========================================================
+
+  void _showMaterialDetail(
+      BuildContext context,
+      Map<String, dynamic> material,
+      ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(28),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(
+            20,
+            12,
+            20,
+            30,
+          ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // =================================================
+                  // HANDLE
+                  // =================================================
+
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color:
+                        colorScheme.onSurface.withOpacity(0.20),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // =================================================
+                  // TITLE
+                  // =================================================
+
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color:
+                          colorScheme.primary.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(17),
+                        ),
+                        child: Icon(
+                          _getMaterialIcon(
+                            material['type']?.toString() ?? '',
+                          ),
+                          color: colorScheme.primary,
+                          size: 29,
+                        ),
+                      ),
+
+                      const SizedBox(width: 14),
+
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              material['title']?.toString() ?? '-',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              material['subject']?.toString() ?? '-',
+                              style: TextStyle(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // =================================================
+                  // INFO
+                  // =================================================
+
+                  _buildDetailRow(
+                    context,
+                    Icons.person_outline_rounded,
+                    'Guru',
+                    material['teacher']?.toString() ?? '-',
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  _buildDetailRow(
+                    context,
+                    Icons.category_outlined,
+                    'Tipe',
+                    material['type']?.toString() ?? '-',
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  // =================================================
+                  // DESCRIPTION
+                  // =================================================
+
+                  Text(
+                    'Deskripsi',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(
+                    material['description']?.toString() ?? '-',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      height: 1.6,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // =================================================
+                  // FILE BUTTON
+                  // =================================================
+
+                  if (_hasFileUrl(material))
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'File materi tersedia.',
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.download_rounded,
+                        ),
+                        label: const Text(
+                          'Buka Materi',
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // =========================================================
+  // DETAIL ROW
+  // =========================================================
+
+  Widget _buildDetailRow(
+      BuildContext context,
+      IconData icon,
+      String label,
+      String value,
+      ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 20,
+          color: colorScheme.primary,
+        ),
+
+        const SizedBox(width: 10),
+
+        SizedBox(
+          width: 70,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+
+        const SizedBox(width: 10),
+
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // =========================================================
+  // EMPTY STATE
+  // =========================================================
+
+  Widget _buildEmptyState(
+      BuildContext context,
+      ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(30),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.outline.withOpacity(0.35),
+        ),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.menu_book_outlined,
+            size: 52,
+            color: colorScheme.primary,
+          ),
+
+          const SizedBox(height: 14),
+
+          Text(
+            'Belum Ada Materi',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+
+          const SizedBox(height: 7),
+
+          Text(
+            'Belum ada materi pembelajaran yang tersedia untuk kelas kamu.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // ERROR STATE
+  // =========================================================
+
+  Widget _buildErrorState(
+      BuildContext context,
+      String message,
+      ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: colorScheme.error.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Icon(
+                Icons.error_outline_rounded,
+                size: 36,
+                color: colorScheme.error,
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            Text(
+              'Gagal Memuat Materi',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            FilledButton.icon(
+              onPressed: _loadMaterials,
+              icon: const Icon(
+                Icons.refresh_rounded,
+              ),
+              label: const Text(
+                'Coba Lagi',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // CHECK FILE URL
+  // =========================================================
+
+  bool _hasFileUrl(
+      Map<String, dynamic> material,
+      ) {
+    final fileUrl =
+        material['fileUrl']?.toString() ?? '';
+
+    return fileUrl.isNotEmpty &&
+        fileUrl != '-';
+  }
+
+  // =========================================================
+  // MATERIAL ICON
+  // =========================================================
+
+  IconData _getMaterialIcon(
+      String type,
+      ) {
+    switch (type.toLowerCase()) {
+      case 'pdf':
+        return Icons.picture_as_pdf_rounded;
+
+      case 'video':
+        return Icons.play_circle_fill_rounded;
+
+      case 'ppt':
+      case 'powerpoint':
+        return Icons.slideshow_rounded;
+
+      case 'doc':
+      case 'docx':
+        return Icons.description_rounded;
+
+      case 'link':
+        return Icons.link_rounded;
+
+      default:
+        return Icons.menu_book_rounded;
+    }
+  }
+}

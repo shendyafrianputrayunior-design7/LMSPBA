@@ -13,8 +13,14 @@ import 'screens/signup_screen.dart';
 import 'screens/email_verification_screen.dart';
 import 'screens/security_screen.dart';
 import 'screens/create_password_screen.dart';
+import 'screens/admin_screen.dart';
+import 'screens/teacher_screen.dart';
 
 class AppRoutes {
+  // ============================================================
+  // ROUTE NAMES
+  // ============================================================
+
   static const String splash = '/';
   static const String home = '/home';
   static const String login = '/login';
@@ -25,55 +31,127 @@ class AppRoutes {
   static const String settings = '/settings';
   static const String forgotPassword = '/forgot-password';
   static const String signup = '/signup';
-  static const String emailVerification = '/email-verification';
+  static const String emailVerification =
+      '/email-verification';
   static const String security = '/security';
-  static const String createPassword = '/create-password';
+  static const String createPassword =
+      '/create-password';
+
+  // ADMIN
+  static const String admin = '/admin';
+
+  static const String teacher = '/teacher';
+
+  // ============================================================
+  // ROUTES
+  // ============================================================
 
   static Map<String, WidgetBuilder> get routes => {
-    // Splash
+
+
+    // ======================================================
+    // SPLASH
+    // ======================================================
+
     splash: (context) => const SplashScreen(),
 
-    // Home
+    // ======================================================
+    // HOME
+    // ======================================================
+
     home: (context) => const HomeScreen(),
 
-    // Login
+    // ======================================================
+    // LOGIN
+    // ======================================================
+
     login: (context) => const LoginScreen(),
 
-    // Onboarding
-    onboarding: (context) => const OnboardingScreen(),
+    // ======================================================
+    // ONBOARDING
+    // ======================================================
 
-    // Courses
-    courses: (context) => const CoursesScreen(),
+    onboarding: (context) =>
+    const OnboardingScreen(),
 
-    // Course Detail
-    courseDetail: (context) => const CourseDetailScreen(),
+    // ======================================================
+    // COURSES
+    // ======================================================
 
-    // Lesson
-    lesson: (context) => const LessonScreen(),
+    courses: (context) =>
+    const CoursesScreen(),
 
-    // Settings
-    settings: (context) => const SettingsScreen(),
+    // ======================================================
+    // COURSE DETAIL
+    // ======================================================
 
-    // Forgot Password
-    forgotPassword: (context) => const ForgotPasswordScreen(),
+    courseDetail: (context) =>
+    const CourseDetailScreen(),
 
-    // Sign Up
-    signup: (context) => const SignupScreen(),
+    // ======================================================
+    // LESSON
+    // ======================================================
 
-    // Security
-    security: (context) => const SecurityScreen(),
+    lesson: (context) =>
+    const LessonScreen(),
 
-    // Create Password
-    createPassword: (context) => const CreatePasswordScreen(),
+    // ======================================================
+    // SETTINGS
+    // ======================================================
 
-    // Email Verification
+    settings: (context) =>
+    const SettingsScreen(),
+
+    // ======================================================
+    // FORGOT PASSWORD
+    // ======================================================
+
+    forgotPassword: (context) =>
+    const ForgotPasswordScreen(),
+
+    // ======================================================
+    // SIGN UP
+    // ======================================================
+
+    signup: (context) =>
+    const SignupScreen(),
+
+    // ======================================================
+    // SECURITY
+    // ======================================================
+
+    security: (context) =>
+    const SecurityScreen(),
+
+    // ======================================================
+    // CREATE PASSWORD
+    // ======================================================
+
+    createPassword: (context) =>
+    const CreatePasswordScreen(),
+
+    // ======================================================
+    // EMAIL VERIFICATION
+    // ======================================================
+
     emailVerification: (context) {
       final email =
-          ModalRoute.of(context)?.settings.arguments as String? ?? '';
+          ModalRoute.of(context)?.settings.arguments
+          as String? ??
+              '';
 
       return EmailVerificationScreen(
         email: email,
       );
     },
+
+    // ======================================================
+    // ADMIN DASHBOARD
+    // ======================================================
+
+    admin: (context) =>
+    const AdminScreen(),
+
+    teacher: (context) => const TeacherScreen(),
   };
 }

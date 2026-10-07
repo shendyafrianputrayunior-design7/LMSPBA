@@ -7,6 +7,7 @@ class EditProfileScreen extends StatefulWidget {
   final String name;
   final String username;
   final String email;
+  final String photoUrl;
   final String phone;
   final String gender;
   final String birthDate;
@@ -23,6 +24,7 @@ class EditProfileScreen extends StatefulWidget {
     required this.name,
     required this.username,
     required this.email,
+    required this.photoUrl,
     required this.phone,
     required this.gender,
     required this.birthDate,
@@ -386,7 +388,6 @@ class _EditProfileScreenState
         crossAxisAlignment:
         CrossAxisAlignment.start,
         children: [
-
           Text(
             title,
             style:
@@ -417,10 +418,10 @@ class _EditProfileScreenState
   }
 
   // ===============================================================
-  // AVATAR
+  // DEFAULT AVATAR
   // ===============================================================
 
-  Widget _buildAvatar(
+  Widget _buildDefaultAvatar(
       BuildContext context,
       ) {
     final theme =
@@ -429,42 +430,11 @@ class _EditProfileScreenState
     final colorScheme =
         theme.colorScheme;
 
-    if (_profileImage != null) {
-      return Container(
-        width: 112,
-        height: 112,
-
-        decoration:
-        BoxDecoration(
-          shape:
-          BoxShape.circle,
-
-          border:
-          Border.all(
-            color:
-            colorScheme.primary,
-            width: 3,
-          ),
-
-          image:
-          DecorationImage(
-            image:
-            FileImage(
-              _profileImage!,
-            ),
-            fit:
-            BoxFit.cover,
-          ),
-        ),
-      );
-    }
-
     final letter =
     _nameController.text
         .trim()
         .isNotEmpty
-        ? _nameController
-        .text
+        ? _nameController.text
         .trim()[0]
         .toUpperCase()
         : 'U';
@@ -472,12 +442,10 @@ class _EditProfileScreenState
     return Container(
       width: 112,
       height: 112,
-
       decoration:
       BoxDecoration(
         shape:
         BoxShape.circle,
-
         gradient:
         LinearGradient(
           colors: [
@@ -490,7 +458,6 @@ class _EditProfileScreenState
           Alignment.bottomRight,
         ),
       ),
-
       child: Center(
         child: Text(
           letter,
@@ -504,6 +471,95 @@ class _EditProfileScreenState
           ),
         ),
       ),
+    );
+  }
+
+  // ===============================================================
+  // AVATAR
+  // ===============================================================
+
+  Widget _buildAvatar(
+      BuildContext context,
+      ) {
+    final colorScheme =
+        Theme.of(context).colorScheme;
+
+    // =============================================================
+    // FOTO BARU DARI GALERI
+    // =============================================================
+
+    if (_profileImage != null) {
+      return Container(
+        width: 112,
+        height: 112,
+        decoration:
+        BoxDecoration(
+          shape:
+          BoxShape.circle,
+          border:
+          Border.all(
+            color:
+            colorScheme.primary,
+            width: 3,
+          ),
+        ),
+        child: ClipOval(
+          child: Image.file(
+            _profileImage!,
+            width: 112,
+            height: 112,
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    }
+
+    // =============================================================
+    // FOTO YANG SUDAH TERSIMPAN DI CLOUDINARY
+    // =============================================================
+
+    if (widget.photoUrl.isNotEmpty) {
+      return Container(
+        width: 112,
+        height: 112,
+        decoration:
+        BoxDecoration(
+          shape:
+          BoxShape.circle,
+          border:
+          Border.all(
+            color:
+            colorScheme.primary,
+            width: 3,
+          ),
+        ),
+        child: ClipOval(
+          child: Image.network(
+            widget.photoUrl,
+            width: 112,
+            height: 112,
+            fit: BoxFit.cover,
+            errorBuilder:
+                (
+                context,
+                error,
+                stackTrace,
+                ) {
+              return _buildDefaultAvatar(
+                context,
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    // =============================================================
+    // BELUM ADA FOTO
+    // =============================================================
+
+    return _buildDefaultAvatar(
+      context,
     );
   }
 
@@ -557,12 +613,10 @@ class _EditProfileScreenState
               Center(
                 child: Column(
                   children: [
-
                     Stack(
                       clipBehavior:
                       Clip.none,
                       children: [
-
                         _buildAvatar(
                           context,
                         ),
@@ -570,31 +624,25 @@ class _EditProfileScreenState
                         Positioned(
                           right: 0,
                           bottom: 0,
-
                           child:
                           Material(
                             color:
                             colorScheme
                                 .primary,
-
                             shape:
                             const CircleBorder(),
-
                             child:
                             InkWell(
                               onTap:
                               _pickImage,
-
                               customBorder:
                               const CircleBorder(),
-
                               child:
                               const Padding(
                                 padding:
                                 EdgeInsets.all(
                                   10,
                                 ),
-
                                 child:
                                 Icon(
                                   Icons
@@ -617,13 +665,11 @@ class _EditProfileScreenState
                     TextButton.icon(
                       onPressed:
                       _pickImage,
-
                       icon:
                       const Icon(
                         Icons
                             .photo_library_outlined,
                       ),
-
                       label:
                       const Text(
                         'Change Profile Photo',
@@ -646,10 +692,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _nameController,
-
                 textInputAction:
                 TextInputAction.next,
-
                 decoration:
                 _decoration(
                   context,
@@ -658,7 +702,6 @@ class _EditProfileScreenState
                   Icons
                       .person_outline_rounded,
                 ),
-
                 validator:
                     (value) {
                   if (value ==
@@ -680,10 +723,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _usernameController,
-
                 textInputAction:
                 TextInputAction.next,
-
                 decoration:
                 _decoration(
                   context,
@@ -692,7 +733,6 @@ class _EditProfileScreenState
                   Icons
                       .alternate_email_rounded,
                 ),
-
                 validator:
                     (value) {
                   if (value ==
@@ -711,14 +751,14 @@ class _EditProfileScreenState
                 height: 14,
               ),
 
+              // =====================================================
               // EMAIL LOCKED
+              // =====================================================
 
               TextFormField(
                 controller:
                 _emailController,
-
                 enabled: false,
-
                 decoration:
                 _decoration(
                   context,
@@ -740,14 +780,12 @@ class _EditProfileScreenState
 
               Row(
                 children: [
-
                   Icon(
                     Icons
                         .info_outline_rounded,
                     size: 15,
                     color:
-                    colorScheme
-                        .primary,
+                    colorScheme.primary,
                   ),
 
                   const SizedBox(
@@ -762,8 +800,7 @@ class _EditProfileScreenState
                         .bodySmall
                         ?.copyWith(
                       color:
-                      colorScheme
-                          .primary,
+                      colorScheme.primary,
                     ),
                   ),
                 ],
@@ -776,13 +813,10 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _phoneController,
-
                 keyboardType:
                 TextInputType.phone,
-
                 textInputAction:
                 TextInputAction.next,
-
                 decoration:
                 _decoration(
                   context,
@@ -804,7 +838,6 @@ class _EditProfileScreenState
                 value: _gender.isEmpty
                     ? null
                     : _gender,
-
                 decoration:
                 _decoration(
                   context,
@@ -812,9 +845,7 @@ class _EditProfileScreenState
                   icon:
                   Icons.wc_outlined,
                 ),
-
                 items: const [
-
                   DropdownMenuItem(
                     value:
                     'Laki-laki',
@@ -823,7 +854,6 @@ class _EditProfileScreenState
                       'Laki-laki',
                     ),
                   ),
-
                   DropdownMenuItem(
                     value:
                     'Perempuan',
@@ -833,7 +863,6 @@ class _EditProfileScreenState
                     ),
                   ),
                 ],
-
                 onChanged:
                     (value) {
                   setState(() {
@@ -850,12 +879,9 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _birthDateController,
-
                 readOnly: true,
-
                 onTap:
                 _pickBirthDate,
-
                 decoration:
                 _decoration(
                   context,
@@ -878,9 +904,7 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _addressController,
-
                 maxLines: 3,
-
                 decoration:
                 _decoration(
                   context,
@@ -906,10 +930,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _schoolController,
-
                 textInputAction:
                 TextInputAction.next,
-
                 decoration:
                 _decoration(
                   context,
@@ -929,10 +951,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _classController,
-
                 textInputAction:
                 TextInputAction.next,
-
                 decoration:
                 _decoration(
                   context,
@@ -951,10 +971,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _majorController,
-
                 textInputAction:
                 TextInputAction.next,
-
                 decoration:
                 _decoration(
                   context,
@@ -974,10 +992,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _nisnController,
-
                 keyboardType:
                 TextInputType.number,
-
                 decoration:
                 _decoration(
                   context,
@@ -1001,11 +1017,8 @@ class _EditProfileScreenState
               TextFormField(
                 controller:
                 _bioController,
-
                 maxLines: 5,
-
                 maxLength: 250,
-
                 decoration:
                 _decoration(
                   context,
@@ -1033,18 +1046,15 @@ class _EditProfileScreenState
                 width:
                 double.infinity,
                 height: 54,
-
                 child:
                 ElevatedButton.icon(
                   onPressed:
                   _saveProfile,
-
                   icon:
                   const Icon(
                     Icons
                         .check_rounded,
                   ),
-
                   label:
                   const Text(
                     'Save Changes',
@@ -1054,7 +1064,6 @@ class _EditProfileScreenState
                       FontWeight.w700,
                     ),
                   ),
-
                   style:
                   ElevatedButton.styleFrom(
                     shape:
