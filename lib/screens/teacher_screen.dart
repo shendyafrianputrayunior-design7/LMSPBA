@@ -14,6 +14,7 @@ import 'teacher_exams_screen.dart';
 import 'teacher_discussions_screen.dart';
 import 'teacher_students_screen.dart';
 import 'teacher_attendance_screen.dart';
+import 'teacher_schedule_form_screen.dart';
 
 class TeacherScreen extends StatefulWidget {
   const TeacherScreen({super.key});
@@ -31,11 +32,17 @@ class _TeacherScreenState extends State<TeacherScreen> {
   Map<String, dynamic>? _teacherData;
   bool _loadingProfile = true;
 
+  // ============================================================
+  // TEACHER ID UTAMA
+  // ============================================================
+
+  static const String _teacherId = 'teacher_001';
+
   @override
   void initState() {
     super.initState();
 
-    _loadTeacherProfile();
+    _initializeTeacherData();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -44,65 +51,19 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // RESOLVE TEACHER DOCUMENT ID
+  // INITIALIZE
   // ============================================================
 
-  Future<String?> _getTeacherDocumentId() async {
-    final user = _auth.currentUser;
+  Future<void> _initializeTeacherData() async {
+    await _loadTeacherProfile();
+  }
 
-    if (user == null) {
-      return null;
-    }
-
-    try {
-      // 1. Ambil teacherId dari users/{uid}
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      final userData = userDoc.data();
-
-      final teacherId = userData?['teacherId']
-          ?.toString()
-          .trim();
-
-      if (teacherId != null && teacherId.isNotEmpty) {
-        final teacherDoc = await _firestore
-            .collection('teachers')
-            .doc(teacherId)
-            .get();
-
-        if (teacherDoc.exists) {
-          return teacherId;
-        }
-      }
-
-      // 2. Fallback berdasarkan email
-      final email = user.email?.trim();
-
-      if (email != null && email.isNotEmpty) {
-        final teacherQuery = await _firestore
-            .collection('teachers')
-            .where('email', isEqualTo: email)
-            .limit(1)
-            .get();
-
-        if (teacherQuery.docs.isNotEmpty) {
-          return teacherQuery.docs.first.id;
-        }
-      }
-    } catch (e) {
-      debugPrint(
-        'Gagal mencari teacher document ID: $e',
-      );
-    }
-
-    return null;
+  Future<void> _refreshTeacherData() async {
+    await _loadTeacherProfile();
   }
 
   // ============================================================
-  // WELCOME DIALOG
+  // WELCOME
   // ============================================================
 
   void _showTeacherWelcomeDialog() {
@@ -214,7 +175,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // LOAD PROFILE GURU
+  // LOAD PROFILE
   // ============================================================
 
   Future<void> _loadTeacherProfile() async {
@@ -243,9 +204,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
         _loadingProfile = false;
       });
     } catch (e) {
-      debugPrint(
-        'Gagal mengambil profile guru: $e',
-      );
+      debugPrint('Gagal mengambil profile guru: $e');
 
       if (!mounted) return;
 
@@ -265,17 +224,9 @@ class _TeacherScreenState extends State<TeacherScreen> {
             _teacherData?['username'] ??
             _teacherData?['displayName'] ??
             'Guru'
-    )
-        .toString()
-        .trim();
+    ).toString().trim();
 
     return name.isEmpty ? 'Guru' : name;
-  }
-
-  String get _teacherId {
-    return (
-        _teacherData?['teacherId'] ?? '-'
-    ).toString();
   }
 
   // ============================================================
@@ -323,7 +274,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // KELOLA MATERI COURSE
+  // KELOLA LESSON
   // ============================================================
 
   void _manageLessons(
@@ -346,7 +297,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // KELOLA QUIZ COURSE
+  // KELOLA QUIZ
   // ============================================================
 
   void _manageQuizzes(
@@ -476,30 +427,18 @@ class _TeacherScreenState extends State<TeacherScreen> {
         },
         destinations: const [
           NavigationDestination(
-            icon: Icon(
-              Icons.dashboard_outlined,
-            ),
-            selectedIcon: Icon(
-              Icons.dashboard,
-            ),
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(
-              Icons.menu_book_outlined,
-            ),
-            selectedIcon: Icon(
-              Icons.menu_book,
-            ),
+            icon: Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book),
             label: 'Courses',
           ),
           NavigationDestination(
-            icon: Icon(
-              Icons.person_outline,
-            ),
-            selectedIcon: Icon(
-              Icons.person,
-            ),
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
             label: 'Profile',
           ),
         ],
@@ -516,11 +455,10 @@ class _TeacherScreenState extends State<TeacherScreen> {
 
     return SafeArea(
       child: RefreshIndicator(
-        onRefresh: _loadTeacherProfile,
+        onRefresh: _refreshTeacherData,
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // HEADER
             Row(
               children: [
                 Expanded(
@@ -559,15 +497,9 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
               ],
             ),
-
             const SizedBox(height: 28),
-
-            // COURSE SUMMARY
             _buildCourseSummary(),
-
             const SizedBox(height: 20),
-
-            // MENU UTAMA
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
@@ -582,8 +514,6 @@ class _TeacherScreenState extends State<TeacherScreen> {
                   title: 'My Courses',
                   subtitle: 'Kelola course',
                   onTap: () {
-                    if (!mounted) return;
-
                     setState(() {
                       _currentIndex = 1;
                     });
@@ -617,20 +547,14 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
               ],
             ),
-
             const SizedBox(height: 28),
-
-            // AKSI CEPAT
             Text(
               'Aksi Cepat',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 12),
-
-            // GRID AKSI CEPAT
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
@@ -645,43 +569,36 @@ class _TeacherScreenState extends State<TeacherScreen> {
                   label: 'Tambah Course',
                   onTap: _openAddCourse,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.calendar_month_outlined,
                   label: 'Jadwal Mengajar',
                   onTap: _showSchedules,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.fact_check_outlined,
                   label: 'Presensi Siswa',
                   onTap: _showAttendance,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.school_outlined,
                   label: 'Ujian',
                   onTap: _showExams,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.library_books_outlined,
                   label: 'Materi',
                   onTap: _showMaterials,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.campaign_outlined,
                   label: 'Pengumuman',
                   onTap: _showAnnouncements,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.forum_outlined,
                   label: 'Diskusi',
                   onTap: _showDiscussions,
                 ),
-
                 _QuickActionButton(
                   icon: Icons.assignment_turned_in_outlined,
                   label: 'Tugas',
@@ -689,7 +606,6 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
               ],
             ),
-
             const SizedBox(height: 20),
           ],
         ),
@@ -702,43 +618,34 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // ============================================================
 
   Widget _buildCourseSummary() {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      return const SizedBox();
-    }
-
     return StreamBuilder<
         QuerySnapshot<Map<String, dynamic>>>(
       stream: _firestore
           .collection('courses')
           .where(
         'teacherId',
-        isEqualTo: user.uid,
+        isEqualTo: _teacherId,
       )
           .snapshots(),
       builder: (context, snapshot) {
         final count =
             snapshot.data?.docs.length ?? 0;
 
+        final theme = Theme.of(context);
+
         return Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color:
-            Theme.of(context)
-                .colorScheme
-                .primaryContainer,
-            borderRadius:
-            BorderRadius.circular(20),
+            color: theme.colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
             children: [
               Icon(
                 Icons.menu_book,
                 size: 36,
-                color: Theme.of(context)
-                    .colorScheme
-                    .onPrimaryContainer,
+                color:
+                theme.colorScheme.onPrimaryContainer,
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -748,20 +655,18 @@ class _TeacherScreenState extends State<TeacherScreen> {
                   children: [
                     Text(
                       '$count Course',
-                      style: Theme.of(context)
+                      style: theme
                           .textTheme
                           .titleLarge
                           ?.copyWith(
-                        fontWeight:
-                        FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Course yang Anda kelola',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium,
+                      style:
+                      theme.textTheme.bodyMedium,
                     ),
                   ],
                 ),
@@ -779,15 +684,6 @@ class _TeacherScreenState extends State<TeacherScreen> {
 
   Widget _buildCourses() {
     final theme = Theme.of(context);
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      return const Center(
-        child: Text(
-          'Akun tidak ditemukan',
-        ),
-      );
-    }
 
     return SafeArea(
       child: StreamBuilder<
@@ -796,7 +692,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
             .collection('courses')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .snapshots(),
         builder: (context, snapshot) {
@@ -815,8 +711,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 child: Text(
                   'Gagal mengambil data course.\n\n'
                       '${snapshot.error}',
-                  textAlign:
-                  TextAlign.center,
+                  textAlign: TextAlign.center,
                 ),
               ),
             );
@@ -834,13 +729,9 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
                 actions: [
                   IconButton(
-                    tooltip:
-                    'Tambah Course',
-                    onPressed:
-                    _openAddCourse,
-                    icon: const Icon(
-                      Icons.add,
-                    ),
+                    tooltip: 'Tambah Course',
+                    onPressed: _openAddCourse,
+                    icon: const Icon(Icons.add),
                   ),
                 ],
               ),
@@ -856,16 +747,13 @@ class _TeacherScreenState extends State<TeacherScreen> {
                         MainAxisSize.min,
                         children: [
                           Icon(
-                            Icons
-                                .menu_book_outlined,
+                            Icons.menu_book_outlined,
                             size: 72,
                             color: theme
                                 .colorScheme
                                 .onSurfaceVariant,
                           ),
-                          const SizedBox(
-                            height: 16,
-                          ),
+                          const SizedBox(height: 16),
                           Text(
                             'Belum ada course',
                             style: theme
@@ -876,26 +764,18 @@ class _TeacherScreenState extends State<TeacherScreen> {
                               FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(
-                            height: 8,
-                          ),
+                          const SizedBox(height: 8),
                           Text(
                             'Tambahkan course pertama Anda.',
                             textAlign:
                             TextAlign.center,
-                            style: theme
-                                .textTheme
-                                .bodyMedium,
                           ),
-                          const SizedBox(
-                            height: 20,
-                          ),
+                          const SizedBox(height: 20),
                           FilledButton.icon(
                             onPressed:
                             _openAddCourse,
-                            icon: const Icon(
-                              Icons.add,
-                            ),
+                            icon:
+                            const Icon(Icons.add),
                             label: const Text(
                               'Tambah Course',
                             ),
@@ -945,7 +825,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
 
                         final lessons =
                         data['lessons'] is int
-                            ? data['lessons'] as int
+                            ? data['lessons']
+                        as int
                             : int.tryParse(
                           (data['lessons'] ??
                               '0')
@@ -957,10 +838,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
                           courseId: doc.id,
                           courseData: data,
                           title: title,
-                          instructor:
-                          instructor,
-                          description:
-                          description,
+                          instructor: instructor,
+                          description: description,
                           image: image,
                           lessons: lessons,
                           onTap: () {
@@ -995,8 +874,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
                           },
                         );
                       },
-                      childCount:
-                      docs.length,
+                      childCount: docs.length,
                     ),
                   ),
                 ),
@@ -1012,30 +890,23 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // ============================================================
 
   void _showAssignments() {
-    final user = _auth.currentUser;
-
-    if (user == null) return;
-
     _showDatabaseSheet(
       title: 'Assignments',
-      icon:
-      Icons.assignment_outlined,
+      icon: Icons.assignment_outlined,
       stream: _firestore
           .collection('assignments')
           .where(
         'teacherId',
-        isEqualTo: user.uid,
+        isEqualTo: _teacherId,
       )
           .snapshots(),
       emptyMessage:
       'Belum ada assignment yang dibuat.',
-      itemBuilder:
-          (context, doc) {
+      itemBuilder: (context, doc) {
         final data = doc.data();
 
         final title =
-        (data['title'] ??
-            'Tanpa Judul')
+        (data['title'] ?? 'Tanpa Judul')
             .toString();
 
         final description =
@@ -1051,8 +922,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
             .toString();
 
         final dueDate =
-        (data['dueDate'] ??
-            '-')
+        (data['dueDate'] ?? '-')
             .toString();
 
         final points =
@@ -1062,8 +932,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
             .toString();
 
         return _DatabaseItemCard(
-          icon:
-          Icons.assignment_outlined,
+          icon: Icons.assignment_outlined,
           title: title,
           subtitle: course.isEmpty
               ? 'Assignment'
@@ -1113,16 +982,12 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // ============================================================
 
   Future<void> _showReports() async {
-    final user = _auth.currentUser;
-
-    if (user == null) return;
-
     bool loadingDialogOpen = true;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) {
+      builder: (_) {
         return const AlertDialog(
           content: Row(
             children: [
@@ -1150,34 +1015,30 @@ class _TeacherScreenState extends State<TeacherScreen> {
             .collection('courses')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .get(),
-
         _firestore
             .collection('assignments')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .get(),
-
         _firestore
             .collection('quizzes')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .get(),
-
         _firestore
             .collection('course_lessons')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .get(),
-
         _firestore
             .collection('users')
             .where(
@@ -1187,50 +1048,20 @@ class _TeacherScreenState extends State<TeacherScreen> {
             .get(),
       ]);
 
-      final courseSnapshot =
-      results[0]
-      as QuerySnapshot<
-          Map<String, dynamic>>;
-
-      final assignmentSnapshot =
-      results[1]
-      as QuerySnapshot<
-          Map<String, dynamic>>;
-
-      final quizSnapshot =
-      results[2]
-      as QuerySnapshot<
-          Map<String, dynamic>>;
-
-      final lessonSnapshot =
-      results[3]
-      as QuerySnapshot<
-          Map<String, dynamic>>;
-
-      final studentSnapshot =
-      results[4]
-      as QuerySnapshot<
-          Map<String, dynamic>>;
-
-      final courseIds =
-      courseSnapshot.docs
-          .map((doc) => doc.id)
-          .toSet();
-
-      final students =
-          studentSnapshot.docs.length;
-
-      final lessons =
-          lessonSnapshot.docs.length;
-
-      final quizzes =
-          quizSnapshot.docs.length;
+      final courses =
+          (results[0] as QuerySnapshot).docs.length;
 
       final assignments =
-          assignmentSnapshot.docs.length;
+          (results[1] as QuerySnapshot).docs.length;
 
-      final courses =
-          courseSnapshot.docs.length;
+      final quizzes =
+          (results[2] as QuerySnapshot).docs.length;
+
+      final lessons =
+          (results[3] as QuerySnapshot).docs.length;
+
+      final students =
+          (results[4] as QuerySnapshot).docs.length;
 
       if (!mounted) return;
 
@@ -1286,9 +1117,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
                           .onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(
-                    height: 20,
-                  ),
+                  const SizedBox(height: 20),
                   GridView.count(
                     crossAxisCount: 2,
                     shrinkWrap: true,
@@ -1299,14 +1128,14 @@ class _TeacherScreenState extends State<TeacherScreen> {
                     childAspectRatio: 1.4,
                     children: [
                       _ReportCard(
-                        icon: Icons
-                            .menu_book_outlined,
+                        icon:
+                        Icons.menu_book_outlined,
                         value: '$courses',
                         label: 'Courses',
                       ),
                       _ReportCard(
-                        icon: Icons
-                            .library_books_outlined,
+                        icon:
+                        Icons.library_books_outlined,
                         value: '$lessons',
                         label: 'Materi',
                       ),
@@ -1317,23 +1146,16 @@ class _TeacherScreenState extends State<TeacherScreen> {
                         label: 'Quiz',
                       ),
                       _ReportCard(
-                        icon: Icons
-                            .assignment_outlined,
+                        icon:
+                        Icons.assignment_outlined,
                         value: '$assignments',
                         label: 'Assignments',
                       ),
                       _ReportCard(
-                        icon: Icons
-                            .groups_outlined,
+                        icon:
+                        Icons.groups_outlined,
                         value: '$students',
                         label: 'Students',
-                      ),
-                      _ReportCard(
-                        icon: Icons
-                            .analytics_outlined,
-                        value:
-                        '${courseIds.length}',
-                        label: 'Course Aktif',
                       ),
                     ],
                   ),
@@ -1362,36 +1184,21 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // ============================================================
 
   Future<void> _showSchedules() async {
-    final teacherId =
-    await _getTeacherDocumentId();
-
-    if (!mounted) return;
-
-    if (teacherId == null ||
-        teacherId.isEmpty) {
-      _showMessage(
-        'Data guru tidak ditemukan. Pastikan akun guru sudah terhubung dengan data teachers.',
-      );
-      return;
-    }
-
     _showDatabaseSheet(
       title: 'Jadwal Mengajar',
-      icon:
-      Icons.calendar_month_outlined,
+      icon: Icons.calendar_month_outlined,
       stream: _firestore
           .collection('schedules')
           .where(
         'teacherId',
-        isEqualTo: teacherId,
+        isEqualTo: _teacherId,
       )
           .snapshots(),
       emptyMessage:
       'Belum ada jadwal mengajar.',
       showAddButton: true,
       onAdd: _showScheduleForm,
-      itemBuilder:
-          (context, doc) {
+      itemBuilder: (context, doc) {
         final data = doc.data();
 
         final subject =
@@ -1401,8 +1208,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
             .toString();
 
         final day =
-        (data['day'] ?? '-')
-            .toString();
+        (data['day'] ?? '-').toString();
 
         final start =
         (data['startTime'] ?? '-')
@@ -1454,530 +1260,15 @@ class _TeacherScreenState extends State<TeacherScreen> {
     String? scheduleId,
     Map<String, dynamic>? scheduleData,
   }) async {
-    final subjectController =
-    TextEditingController(
-      text: (
-          scheduleData?['subject'] ??
-              scheduleData?['title'] ??
-              ''
-      ).toString(),
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TeacherScheduleFormScreen(
+          scheduleId: scheduleId,
+          scheduleData: scheduleData,
+        ),
+      ),
     );
-
-    final roomController =
-    TextEditingController(
-      text:
-      (scheduleData?['room'] ?? '')
-          .toString(),
-    );
-
-    final classIdController =
-    TextEditingController(
-      text:
-      (scheduleData?['classId'] ?? '')
-          .toString(),
-    );
-
-    final courseIdController =
-    TextEditingController(
-      text:
-      (scheduleData?['courseId'] ?? '')
-          .toString(),
-    );
-
-    final formKey =
-    GlobalKey<FormState>();
-
-    String selectedDay =
-    (scheduleData?['day'] ??
-        'Senin')
-        .toString();
-
-    String startTime =
-    (scheduleData?['startTime'] ??
-        '07:00')
-        .toString();
-
-    String endTime =
-    (scheduleData?['endTime'] ??
-        '08:00')
-        .toString();
-
-    final days = [
-      'Senin',
-      'Selasa',
-      'Rabu',
-      'Kamis',
-      'Jumat',
-      'Sabtu',
-    ];
-
-    final result =
-    await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        bool saving = false;
-
-        return StatefulBuilder(
-          builder: (
-              dialogBuildContext,
-              setDialogState,
-              ) {
-            return AlertDialog(
-              title: Text(
-                scheduleId == null
-                    ? 'Tambah Jadwal'
-                    : 'Edit Jadwal',
-              ),
-              content: SizedBox(
-                width: 500,
-                child:
-                SingleChildScrollView(
-                  child: Form(
-                    key: formKey,
-                    child: Column(
-                      mainAxisSize:
-                      MainAxisSize.min,
-                      children: [
-                        TextFormField(
-                          controller:
-                          subjectController,
-                          decoration:
-                          const InputDecoration(
-                            labelText:
-                            'Mata Pelajaran',
-                            prefixIcon:
-                            Icon(
-                              Icons
-                                  .menu_book_outlined,
-                            ),
-                          ),
-                          validator:
-                              (value) {
-                            if (value ==
-                                null ||
-                                value
-                                    .trim()
-                                    .isEmpty) {
-                              return 'Mata pelajaran wajib diisi';
-                            }
-
-                            return null;
-                          },
-                        ),
-
-                        const SizedBox(
-                          height: 14,
-                        ),
-
-                        DropdownButtonFormField<
-                            String>(
-                          initialValue:
-                          days.contains(
-                            selectedDay,
-                          )
-                              ? selectedDay
-                              : 'Senin',
-                          decoration:
-                          const InputDecoration(
-                            labelText:
-                            'Hari',
-                            prefixIcon:
-                            Icon(
-                              Icons
-                                  .calendar_today_outlined,
-                            ),
-                          ),
-                          items: days
-                              .map(
-                                (day) =>
-                                DropdownMenuItem<
-                                    String>(
-                                  value: day,
-                                  child:
-                                  Text(day),
-                                ),
-                          )
-                              .toList(),
-                          onChanged:
-                          saving
-                              ? null
-                              : (value) {
-                            if (value ==
-                                null) {
-                              return;
-                            }
-
-                            setDialogState(
-                                  () {
-                                selectedDay =
-                                    value;
-                              },
-                            );
-                          },
-                        ),
-
-                        const SizedBox(
-                          height: 14,
-                        ),
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child:
-                              _ScheduleTimeField(
-                                label:
-                                'Jam Mulai',
-                                value:
-                                startTime,
-                                enabled:
-                                !saving,
-                                onTap:
-                                    () async {
-                                  final selected =
-                                  await showTimePicker(
-                                    context:
-                                    dialogBuildContext,
-                                    initialTime:
-                                    _parseTime(
-                                      startTime,
-                                    ),
-                                  );
-
-                                  if (selected ==
-                                      null) {
-                                    return;
-                                  }
-
-                                  setDialogState(
-                                        () {
-                                      startTime =
-                                          _formatTimeOfDay(
-                                            selected,
-                                          );
-                                    },
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(
-                              width: 12,
-                            ),
-                            Expanded(
-                              child:
-                              _ScheduleTimeField(
-                                label:
-                                'Jam Selesai',
-                                value:
-                                endTime,
-                                enabled:
-                                !saving,
-                                onTap:
-                                    () async {
-                                  final selected =
-                                  await showTimePicker(
-                                    context:
-                                    dialogBuildContext,
-                                    initialTime:
-                                    _parseTime(
-                                      endTime,
-                                    ),
-                                  );
-
-                                  if (selected ==
-                                      null) {
-                                    return;
-                                  }
-
-                                  setDialogState(
-                                        () {
-                                      endTime =
-                                          _formatTimeOfDay(
-                                            selected,
-                                          );
-                                    },
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(
-                          height: 14,
-                        ),
-
-                        TextFormField(
-                          controller:
-                          roomController,
-                          decoration:
-                          const InputDecoration(
-                            labelText:
-                            'Ruangan',
-                            prefixIcon:
-                            Icon(
-                              Icons
-                                  .meeting_room_outlined,
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(
-                          height: 14,
-                        ),
-
-                        TextFormField(
-                          controller:
-                          classIdController,
-                          decoration:
-                          const InputDecoration(
-                            labelText:
-                            'Class ID',
-                            prefixIcon:
-                            Icon(
-                              Icons
-                                  .groups_outlined,
-                            ),
-                          ),
-                          validator:
-                              (value) {
-                            if (value ==
-                                null ||
-                                value
-                                    .trim()
-                                    .isEmpty) {
-                              return 'Class ID wajib diisi';
-                            }
-
-                            return null;
-                          },
-                        ),
-
-                        const SizedBox(
-                          height: 14,
-                        ),
-
-                        TextFormField(
-                          controller:
-                          courseIdController,
-                          decoration:
-                          const InputDecoration(
-                            labelText:
-                            'Course ID',
-                            prefixIcon:
-                            Icon(
-                              Icons
-                                  .book_outlined,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed:
-                  saving
-                      ? null
-                      : () {
-                    Navigator.of(
-                      dialogContext,
-                    ).pop(false);
-                  },
-                  child:
-                  const Text('Batal'),
-                ),
-                FilledButton(
-                  onPressed:
-                  saving
-                      ? null
-                      : () async {
-                    if (!formKey
-                        .currentState!
-                        .validate()) {
-                      return;
-                    }
-
-                    if (_timeToMinutes(
-                      startTime,
-                    ) >=
-                        _timeToMinutes(
-                          endTime,
-                        )) {
-                      ScaffoldMessenger
-                          .of(
-                        dialogBuildContext,
-                      ).showSnackBar(
-                        const SnackBar(
-                          content:
-                          Text(
-                            'Jam selesai harus lebih besar dari jam mulai.',
-                          ),
-                        ),
-                      );
-
-                      return;
-                    }
-
-                    setDialogState(
-                          () {
-                        saving =
-                        true;
-                      },
-                    );
-
-                    try {
-                      final teacherId =
-                      await _getTeacherDocumentId();
-
-                      if (teacherId ==
-                          null ||
-                          teacherId
-                              .isEmpty) {
-                        throw Exception(
-                          'Data guru tidak ditemukan. Pastikan teacherId pada users sudah terhubung dengan dokumen teachers.',
-                        );
-                      }
-
-                      final data =
-                      <String,
-                          dynamic>{
-                        'subject':
-                        subjectController
-                            .text
-                            .trim(),
-                        'title':
-                        subjectController
-                            .text
-                            .trim(),
-                        'day':
-                        selectedDay,
-                        'startTime':
-                        startTime,
-                        'endTime':
-                        endTime,
-                        'room':
-                        roomController
-                            .text
-                            .trim(),
-                        'classId':
-                        classIdController
-                            .text
-                            .trim(),
-                        'courseId':
-                        courseIdController
-                            .text
-                            .trim(),
-                        'teacherId':
-                        teacherId,
-                        'teacherName':
-                        _teacherName,
-                        'updatedAt':
-                        FieldValue
-                            .serverTimestamp(),
-                      };
-
-                      if (scheduleId ==
-                          null) {
-                        data[
-                        'createdAt'] =
-                            FieldValue
-                                .serverTimestamp();
-
-                        await _firestore
-                            .collection(
-                          'schedules',
-                        )
-                            .add(
-                          data,
-                        );
-                      } else {
-                        await _firestore
-                            .collection(
-                          'schedules',
-                        )
-                            .doc(
-                          scheduleId,
-                        )
-                            .update(
-                          data,
-                        );
-                      }
-
-                      if (!mounted) {
-                        return;
-                      }
-
-                      Navigator.of(
-                        dialogContext,
-                      ).pop(true);
-
-                      ScaffoldMessenger
-                          .of(
-                        context,
-                      ).showSnackBar(
-                        SnackBar(
-                          content:
-                          Text(
-                            scheduleId ==
-                                null
-                                ? 'Jadwal berhasil ditambahkan.'
-                                : 'Jadwal berhasil diperbarui.',
-                          ),
-                        ),
-                      );
-                    } catch (e) {
-                      setDialogState(
-                            () {
-                          saving =
-                          false;
-                        },
-                      );
-
-                      if (!mounted) {
-                        return;
-                      }
-
-                      ScaffoldMessenger
-                          .of(
-                        context,
-                      ).showSnackBar(
-                        SnackBar(
-                          content:
-                          Text(
-                            'Gagal menyimpan jadwal: $e',
-                          ),
-                        ),
-                      );
-                    }
-                  },
-                  child: saving
-                      ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child:
-                    CircularProgressIndicator(
-                      strokeWidth: 2,
-                    ),
-                  )
-                      : Text(
-                    scheduleId == null
-                        ? 'Tambah'
-                        : 'Simpan',
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    subjectController.dispose();
-    roomController.dispose();
-    classIdController.dispose();
-    courseIdController.dispose();
 
     if (!mounted) return;
 
@@ -1987,7 +1278,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // HAPUS JADWAL
+  // DELETE SCHEDULE
   // ============================================================
 
   Future<void> _deleteSchedule(
@@ -2064,63 +1355,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // HELPER WAKTU
-  // ============================================================
-
-  TimeOfDay _parseTime(String value) {
-    final parts = value.split(':');
-
-    if (parts.length == 2) {
-      final hour =
-      int.tryParse(parts[0]);
-
-      final minute =
-      int.tryParse(parts[1]);
-
-      if (hour != null &&
-          minute != null &&
-          hour >= 0 &&
-          hour <= 23 &&
-          minute >= 0 &&
-          minute <= 59) {
-        return TimeOfDay(
-          hour: hour,
-          minute: minute,
-        );
-      }
-    }
-
-    return const TimeOfDay(
-      hour: 7,
-      minute: 0,
-    );
-  }
-
-  String _formatTimeOfDay(
-      TimeOfDay time,
-      ) {
-    return '${time.hour.toString().padLeft(2, '0')}:'
-        '${time.minute.toString().padLeft(2, '0')}';
-  }
-
-  int _timeToMinutes(String value) {
-    final parts = value.split(':');
-
-    if (parts.length != 2) {
-      return 0;
-    }
-
-    final hour =
-        int.tryParse(parts[0]) ?? 0;
-
-    final minute =
-        int.tryParse(parts[1]) ?? 0;
-
-    return (hour * 60) + minute;
-  }
-
-  // ============================================================
-  // EXAMS
+  // OTHER MENU
   // ============================================================
 
   void _showExams() {
@@ -2133,10 +1368,6 @@ class _TeacherScreenState extends State<TeacherScreen> {
     );
   }
 
-  // ============================================================
-  // MATERIALS
-  // ============================================================
-
   void _showMaterials() {
     Navigator.push(
       context,
@@ -2147,10 +1378,6 @@ class _TeacherScreenState extends State<TeacherScreen> {
     );
   }
 
-  // ============================================================
-  // ANNOUNCEMENTS
-  // ============================================================
-
   void _showAnnouncements() {
     Navigator.push(
       context,
@@ -2160,10 +1387,6 @@ class _TeacherScreenState extends State<TeacherScreen> {
       ),
     );
   }
-
-  // ============================================================
-  // DISCUSSIONS
-  // ============================================================
 
   void _showDiscussions() {
     Navigator.push(
@@ -2176,7 +1399,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // GENERIC DATABASE SHEET
+  // DATABASE SHEET
   // ============================================================
 
   void _showDatabaseSheet({
@@ -2234,13 +1457,10 @@ class _TeacherScreenState extends State<TeacherScreen> {
                       ),
                       if (showAddButton)
                         IconButton.filledTonal(
-                          tooltip:
-                          'Tambah',
+                          tooltip: 'Tambah',
                           onPressed: onAdd,
                           icon:
-                          const Icon(
-                            Icons.add,
-                          ),
+                          const Icon(Icons.add),
                         ),
                     ],
                   ),
@@ -2305,8 +1525,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
                                       .onSurfaceVariant,
                                 ),
                                 const SizedBox(
-                                  height: 16,
-                                ),
+                                    height: 16),
                                 Text(
                                   emptyMessage,
                                   textAlign:
@@ -2315,10 +1534,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
                                 ),
                                 if (showAddButton) ...[
                                   const SizedBox(
-                                    height: 20,
-                                  ),
-                                  FilledButton
-                                      .icon(
+                                      height: 20),
+                                  FilledButton.icon(
                                     onPressed:
                                     onAdd,
                                     icon:
@@ -2372,13 +1589,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
     );
   }
 
-  // ============================================================
-  // MESSAGE
-  // ============================================================
-
-  void _showMessage(
-      String message,
-      ) {
+  void _showMessage(String message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context)
@@ -2394,11 +1605,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // ============================================================
 
   Widget _buildProfile() {
-    final theme =
-    Theme.of(context);
-
-    final user =
-        _auth.currentUser;
+    final theme = Theme.of(context);
+    final user = _auth.currentUser;
 
     return SafeArea(
       child: ListView(
@@ -2415,9 +1623,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
               FontWeight.bold,
             ),
           ),
-
           const SizedBox(height: 24),
-
           Center(
             child: CircleAvatar(
               radius: 46,
@@ -2427,14 +1633,13 @@ class _TeacherScreenState extends State<TeacherScreen> {
               child: Icon(
                 Icons.person,
                 size: 48,
-                color: theme.colorScheme
+                color: theme
+                    .colorScheme
                     .onPrimaryContainer,
               ),
             ),
           ),
-
           const SizedBox(height: 16),
-
           Center(
             child: Text(
               _loadingProfile
@@ -2449,9 +1654,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
               ),
             ),
           ),
-
           const SizedBox(height: 4),
-
           Center(
             child: Text(
               user?.email ?? '-',
@@ -2465,27 +1668,22 @@ class _TeacherScreenState extends State<TeacherScreen> {
               ),
             ),
           ),
-
           const SizedBox(height: 28),
-
           Card(
             child: Column(
               children: [
-                ListTile(
-                  leading: const Icon(
-                    Icons.badge_outlined,
-                  ),
-                  title: const Text(
-                    'Teacher ID',
-                  ),
+                const ListTile(
+                  leading:
+                  Icon(Icons.badge_outlined),
+                  title:
+                  Text('Teacher ID'),
                   subtitle:
                   Text(_teacherId),
                 ),
-                const Divider(
-                  height: 1,
-                ),
+                const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(
+                  leading:
+                  const Icon(
                     Icons.email_outlined,
                   ),
                   title:
@@ -2498,14 +1696,11 @@ class _TeacherScreenState extends State<TeacherScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 20),
-
           OutlinedButton.icon(
             onPressed: _logout,
-            icon: const Icon(
-              Icons.logout,
-            ),
+            icon:
+            const Icon(Icons.logout),
             label:
             const Text('Logout'),
           ),
@@ -2516,7 +1711,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
 }
 
 // ================================================================
-// QUICK ACTION BUTTON
+// QUICK ACTION
 // ================================================================
 
 class _QuickActionButton
@@ -2532,14 +1727,13 @@ class _QuickActionButton
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
     return Material(
-      color: theme.colorScheme.surface,
+      color:
+      theme.colorScheme.surface,
       borderRadius:
       BorderRadius.circular(14),
       child: InkWell(
@@ -2552,8 +1746,7 @@ class _QuickActionButton
             borderRadius:
             BorderRadius.circular(14),
             border: Border.all(
-              color: theme
-                  .colorScheme
+              color: theme.colorScheme
                   .outlineVariant,
             ),
           ),
@@ -2585,9 +1778,7 @@ class _QuickActionButton
                       .onPrimaryContainer,
                 ),
               ),
-
               const SizedBox(width: 9),
-
               Expanded(
                 child: Text(
                   label,
@@ -2630,9 +1821,7 @@ class _DashboardCard
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
@@ -2649,8 +1838,6 @@ class _DashboardCard
             CrossAxisAlignment.start,
             mainAxisAlignment:
             MainAxisAlignment.center,
-            mainAxisSize:
-            MainAxisSize.min,
             children: [
               Icon(
                 icon,
@@ -2659,9 +1846,7 @@ class _DashboardCard
                     .colorScheme
                     .primary,
               ),
-              const SizedBox(
-                height: 8,
-              ),
+              const SizedBox(height: 8),
               Text(
                 title,
                 maxLines: 1,
@@ -2675,9 +1860,7 @@ class _DashboardCard
                   FontWeight.bold,
                 ),
               ),
-              const SizedBox(
-                height: 3,
-              ),
+              const SizedBox(height: 3),
               Text(
                 subtitle,
                 maxLines: 1,
@@ -2701,7 +1884,7 @@ class _DashboardCard
 }
 
 // ================================================================
-// DATABASE ITEM CARD
+// DATABASE ITEM
 // ================================================================
 
 class _DatabaseItemCard
@@ -2719,9 +1902,7 @@ class _DatabaseItemCard
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
@@ -2739,13 +1920,12 @@ class _DatabaseItemCard
                   .primaryContainer,
               child: Icon(
                 icon,
-                color: theme.colorScheme
+                color: theme
+                    .colorScheme
                     .onPrimaryContainer,
               ),
             ),
-            const SizedBox(
-              width: 12,
-            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment:
@@ -2762,9 +1942,7 @@ class _DatabaseItemCard
                     ),
                   ),
                   if (subtitle.isNotEmpty) ...[
-                    const SizedBox(
-                      height: 4,
-                    ),
+                    const SizedBox(height: 4),
                     Text(
                       subtitle,
                       style: theme
@@ -2780,9 +1958,7 @@ class _DatabaseItemCard
                   for (final detail
                   in details)
                     if (detail.isNotEmpty) ...[
-                      const SizedBox(
-                        height: 6,
-                      ),
+                      const SizedBox(height: 6),
                       Text(
                         detail,
                         style: theme
@@ -2831,9 +2007,7 @@ class _ScheduleCard
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
@@ -2868,11 +2042,7 @@ class _ScheduleCard
                     .onPrimaryContainer,
               ),
             ),
-
-            const SizedBox(
-              width: 12,
-            ),
-
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment:
@@ -2891,11 +2061,7 @@ class _ScheduleCard
                       FontWeight.bold,
                     ),
                   ),
-
-                  const SizedBox(
-                    height: 5,
-                  ),
-
+                  const SizedBox(height: 5),
                   Text(
                     day,
                     style: theme
@@ -2909,11 +2075,7 @@ class _ScheduleCard
                       FontWeight.w600,
                     ),
                   ),
-
-                  const SizedBox(
-                    height: 10,
-                  ),
-
+                  const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -2934,7 +2096,8 @@ class _ScheduleCard
                       _InfoChip(
                         icon: Icons
                             .groups_outlined,
-                        text: classId.isEmpty
+                        text:
+                        classId.isEmpty
                             ? '-'
                             : classId,
                       ),
@@ -2943,19 +2106,14 @@ class _ScheduleCard
                 ],
               ),
             ),
-
             PopupMenuButton<String>(
-              tooltip:
-              'Menu Jadwal',
-              onSelected:
-                  (value) {
-                switch (value) {
-                  case 'edit':
-                    onEdit();
-                    break;
-                  case 'delete':
-                    onDelete();
-                    break;
+              tooltip: 'Menu Jadwal',
+              onSelected: (value) {
+                if (value == 'edit') {
+                  onEdit();
+                } else if (value ==
+                    'delete') {
+                  onDelete();
                 }
               },
               itemBuilder:
@@ -2968,9 +2126,7 @@ class _ScheduleCard
                         Icons
                             .edit_outlined,
                       ),
-                      SizedBox(
-                        width: 10,
-                      ),
+                      SizedBox(width: 10),
                       Text('Edit'),
                     ],
                   ),
@@ -2983,9 +2139,7 @@ class _ScheduleCard
                         Icons
                             .delete_outline,
                       ),
-                      SizedBox(
-                        width: 10,
-                      ),
+                      SizedBox(width: 10),
                       Text('Hapus'),
                     ],
                   ),
@@ -3014,9 +2168,7 @@ class _InfoChip
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
@@ -3028,13 +2180,10 @@ class _InfoChip
       ),
       decoration:
       BoxDecoration(
-        color: theme
-            .colorScheme
+        color: theme.colorScheme
             .surfaceContainerHighest,
         borderRadius:
-        BorderRadius.circular(
-          10,
-        ),
+        BorderRadius.circular(10),
       ),
       child: Row(
         mainAxisSize:
@@ -3043,61 +2192,17 @@ class _InfoChip
           Icon(
             icon,
             size: 15,
-            color: theme.colorScheme
+            color: theme
+                .colorScheme
                 .onSurfaceVariant,
           ),
-          const SizedBox(
-            width: 5,
-          ),
+          const SizedBox(width: 5),
           Text(
             text,
-            style: theme
-                .textTheme
-                .bodySmall,
+            style:
+            theme.textTheme.bodySmall,
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ================================================================
-// SCHEDULE TIME FIELD
-// ================================================================
-
-class _ScheduleTimeField
-    extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  const _ScheduleTimeField({
-    required this.label,
-    required this.value,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(
-      BuildContext context,
-      ) {
-    return InkWell(
-      onTap:
-      enabled ? onTap : null,
-      borderRadius:
-      BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration:
-        InputDecoration(
-          labelText: label,
-          prefixIcon: const Icon(
-            Icons
-                .access_time_outlined,
-          ),
-        ),
-        child: Text(value),
       ),
     );
   }
@@ -3120,9 +2225,7 @@ class _ReportCard
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
@@ -3141,9 +2244,7 @@ class _ReportCard
                   .colorScheme
                   .primary,
             ),
-            const SizedBox(
-              height: 8,
-            ),
+            const SizedBox(height: 8),
             Text(
               value,
               style: theme
@@ -3154,14 +2255,11 @@ class _ReportCard
                 FontWeight.bold,
               ),
             ),
-            const SizedBox(
-              height: 2,
-            ),
+            const SizedBox(height: 2),
             Text(
               label,
-              style: theme
-                  .textTheme
-                  .bodySmall,
+              style:
+              theme.textTheme.bodySmall,
             ),
           ],
         ),
@@ -3171,20 +2269,18 @@ class _ReportCard
 }
 
 // ================================================================
-// COURSE CARD GURU
+// COURSE CARD
 // ================================================================
 
 class _CourseTeacherCard
     extends StatelessWidget {
   final String courseId;
   final Map<String, dynamic> courseData;
-
   final String title;
   final String instructor;
   final String description;
   final String image;
   final int lessons;
-
   final VoidCallback onTap;
   final VoidCallback onLessons;
   final VoidCallback onQuiz;
@@ -3207,9 +2303,7 @@ class _CourseTeacherCard
   });
 
   @override
-  Widget build(
-      BuildContext context,
-      ) {
+  Widget build(BuildContext context) {
     final theme =
     Theme.of(context);
 
@@ -3230,11 +2324,7 @@ class _CourseTeacherCard
             CrossAxisAlignment.start,
             children: [
               _buildImage(theme),
-
-              const SizedBox(
-                width: 14,
-              ),
-
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment:
@@ -3249,19 +2339,16 @@ class _CourseTeacherCard
                             title,
                             maxLines: 2,
                             overflow:
-                            TextOverflow
-                                .ellipsis,
+                            TextOverflow.ellipsis,
                             style: theme
                                 .textTheme
                                 .titleMedium
                                 ?.copyWith(
                               fontWeight:
-                              FontWeight
-                                  .bold,
+                              FontWeight.bold,
                             ),
                           ),
                         ),
-
                         PopupMenuButton<String>(
                           tooltip:
                           'Menu Course',
@@ -3271,15 +2358,12 @@ class _CourseTeacherCard
                               case 'lessons':
                                 onLessons();
                                 break;
-
                               case 'quiz':
                                 onQuiz();
                                 break;
-
                               case 'edit':
                                 onEdit();
                                 break;
-
                               case 'delete':
                                 onDelete();
                                 break;
@@ -3298,8 +2382,7 @@ class _CourseTeacherCard
                                         .library_books_outlined,
                                   ),
                                   SizedBox(
-                                    width: 10,
-                                  ),
+                                      width: 10),
                                   Text(
                                     'Kelola Materi',
                                   ),
@@ -3307,8 +2390,7 @@ class _CourseTeacherCard
                               ),
                             ),
                             PopupMenuItem(
-                              value:
-                              'quiz',
+                              value: 'quiz',
                               child: Row(
                                 children: [
                                   Icon(
@@ -3316,8 +2398,7 @@ class _CourseTeacherCard
                                         .quiz_outlined,
                                   ),
                                   SizedBox(
-                                    width: 10,
-                                  ),
+                                      width: 10),
                                   Text(
                                     'Kelola Quiz',
                                   ),
@@ -3325,8 +2406,7 @@ class _CourseTeacherCard
                               ),
                             ),
                             PopupMenuItem(
-                              value:
-                              'edit',
+                              value: 'edit',
                               child: Row(
                                 children: [
                                   Icon(
@@ -3334,8 +2414,7 @@ class _CourseTeacherCard
                                         .edit_outlined,
                                   ),
                                   SizedBox(
-                                    width: 10,
-                                  ),
+                                      width: 10),
                                   Text(
                                     'Edit',
                                   ),
@@ -3343,8 +2422,7 @@ class _CourseTeacherCard
                               ),
                             ),
                             PopupMenuItem(
-                              value:
-                              'delete',
+                              value: 'delete',
                               child: Row(
                                 children: [
                                   Icon(
@@ -3352,8 +2430,7 @@ class _CourseTeacherCard
                                         .delete_outline,
                                   ),
                                   SizedBox(
-                                    width: 10,
-                                  ),
+                                      width: 10),
                                   Text(
                                     'Hapus',
                                   ),
@@ -3364,11 +2441,7 @@ class _CourseTeacherCard
                         ),
                       ],
                     ),
-
-                    const SizedBox(
-                      height: 6,
-                    ),
-
+                    const SizedBox(height: 6),
                     Text(
                       instructor,
                       maxLines: 1,
@@ -3383,11 +2456,7 @@ class _CourseTeacherCard
                             .primary,
                       ),
                     ),
-
-                    const SizedBox(
-                      height: 8,
-                    ),
-
+                    const SizedBox(height: 8),
                     Text(
                       description.isEmpty
                           ? 'Belum ada deskripsi.'
@@ -3399,11 +2468,7 @@ class _CourseTeacherCard
                           .textTheme
                           .bodySmall,
                     ),
-
-                    const SizedBox(
-                      height: 10,
-                    ),
-
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Icon(
@@ -3414,9 +2479,7 @@ class _CourseTeacherCard
                               .colorScheme
                               .onSurfaceVariant,
                         ),
-                        const SizedBox(
-                          width: 5,
-                        ),
+                        const SizedBox(width: 5),
                         Text(
                           '$lessons materi',
                           style: theme
@@ -3435,13 +2498,7 @@ class _CourseTeacherCard
     );
   }
 
-  // ============================================================
-  // IMAGE COURSE
-  // ============================================================
-
-  Widget _buildImage(
-      ThemeData theme,
-      ) {
+  Widget _buildImage(ThemeData theme) {
     if (image.isEmpty) {
       return Container(
         width: 90,
@@ -3452,9 +2509,7 @@ class _CourseTeacherCard
               .colorScheme
               .surfaceContainerHighest,
           borderRadius:
-          BorderRadius.circular(
-            14,
-          ),
+          BorderRadius.circular(14),
         ),
         child: Icon(
           Icons
@@ -3475,11 +2530,8 @@ class _CourseTeacherCard
         width: 90,
         height: 90,
         fit: BoxFit.cover,
-        errorBuilder: (
-            context,
-            error,
-            stackTrace,
-            ) {
+        errorBuilder:
+            (context, error, stackTrace) {
           return Container(
             width: 90,
             height: 90,

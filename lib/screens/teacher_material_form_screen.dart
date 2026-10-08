@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/cloudinary_service.dart';
@@ -24,8 +23,13 @@ class TeacherMaterialFormScreen extends StatefulWidget {
 
 class _TeacherMaterialFormScreenState
     extends State<TeacherMaterialFormScreen> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // ============================================================
+  // CANONICAL TEACHER ID
+  // ============================================================
+
+  static const String _fixedTeacherId = 'teacher_001';
 
   final _formKey = GlobalKey<FormState>();
 
@@ -35,7 +39,7 @@ class _TeacherMaterialFormScreenState
   final _attachmentUrlController = TextEditingController();
 
   String _teacherName = 'Guru';
-  String? _teacherId;
+  String _teacherId = _fixedTeacherId;
 
   bool _loading = false;
   bool _loadingData = true;
@@ -68,7 +72,6 @@ class _TeacherMaterialFormScreenState
   String? _existingVideoFileName;
   int? _existingVideoSize;
 
-  // Ukuran video baru yang dipilih.
   int? _selectedVideoSize;
 
   static const int _maxVideoSize = 100 * 1024 * 1024;
@@ -179,135 +182,54 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
-  // GET CANONICAL TEACHER DOCUMENT ID
+  // LOAD TEACHER PROFILE
   // ============================================================
 
-  Future<String?> _getTeacherDocumentId() async {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      return null;
-    }
-
-    // ----------------------------------------------------------
-    // PRIORITAS 1:
-    // users/{uid}.teacherId
-    // ----------------------------------------------------------
-
+  Future<void> _loadTeacherProfile() async {
     try {
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      String teacherName = 'Guru';
 
-      final userData = userDoc.data();
-
-      final teacherId =
-      userData?['teacherId']?.toString().trim();
-
-      if (teacherId != null && teacherId.isNotEmpty) {
-        return teacherId;
-      }
-    } catch (_) {
-      // Lanjut ke fallback email.
-    }
-
-    // ----------------------------------------------------------
-    // PRIORITAS 2:
-    // teachers.email == Firebase Auth email
-    // ----------------------------------------------------------
-
-    final email = user.email?.trim();
-
-    if (email != null && email.isNotEmpty) {
       try {
         final teacherQuery = await _firestore
-            .collection('teachers')
+            .collection('users')
             .where(
-          'email',
-          isEqualTo: email,
+          'teacherId',
+          isEqualTo: _fixedTeacherId,
         )
             .limit(1)
             .get();
 
         if (teacherQuery.docs.isNotEmpty) {
-          return teacherQuery.docs.first.id;
+          final data =
+          teacherQuery.docs.first.data();
+
+          final name = (
+              data['name'] ??
+                  data['username'] ??
+                  data['displayName'] ??
+                  'Guru'
+          ).toString();
+
+          if (name.trim().isNotEmpty) {
+            teacherName = name.trim();
+          }
         }
       } catch (_) {
-        // Teacher tidak ditemukan.
+        teacherName = 'Guru';
       }
-    }
-
-    return null;
-  }
-
-  // ============================================================
-  // LOAD TEACHER
-  // ============================================================
-
-  Future<void> _loadTeacherProfile() async {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _teacherName = 'Guru';
-          _teacherId = null;
-        });
-      }
-
-      return;
-    }
-
-    try {
-      String teacherName = 'Guru';
-
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (snapshot.exists) {
-        final data = snapshot.data() ?? {};
-
-        final name = (
-            data['name'] ??
-                data['username'] ??
-                data['displayName'] ??
-                user.displayName ??
-                'Guru'
-        ).toString();
-
-        if (name.trim().isNotEmpty) {
-          teacherName = name.trim();
-        }
-      } else if (user.displayName != null &&
-          user.displayName!.trim().isNotEmpty) {
-        teacherName = user.displayName!.trim();
-      }
-
-      final teacherId =
-      await _getTeacherDocumentId();
 
       if (!mounted) return;
 
       setState(() {
         _teacherName = teacherName;
-        _teacherId = teacherId;
+        _teacherId = _fixedTeacherId;
       });
     } catch (_) {
-      final teacherId =
-      await _getTeacherDocumentId();
-
       if (!mounted) return;
 
       setState(() {
-        _teacherName =
-        user.displayName?.trim().isNotEmpty == true
-            ? user.displayName!.trim()
-            : 'Guru';
-
-        _teacherId = teacherId;
+        _teacherName = 'Guru';
+        _teacherId = _fixedTeacherId;
       });
     }
   }
@@ -317,35 +239,16 @@ class _TeacherMaterialFormScreenState
   // ============================================================
 
   Future<void> _loadCourses() async {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _loadingData = false;
-        });
-      }
-
-      return;
-    }
-
     try {
-      // PENTING:
-      // Courses tetap menggunakan Firebase Auth UID
-      // karena struktur Courses saat ini sudah berjalan.
       final snapshot = await _firestore
           .collection('courses')
           .where(
         'teacherId',
-        isEqualTo: user.uid,
+        isEqualTo: _fixedTeacherId,
       )
           .get();
 
       final courses = snapshot.docs.toList();
-
-      // ========================================================
-      // SORT COURSE
-      // ========================================================
 
       courses.sort((a, b) {
         final dataA = a.data();
@@ -374,10 +277,6 @@ class _TeacherMaterialFormScreenState
         _courses = courses;
         _loadingData = false;
       });
-
-      // ========================================================
-      // SINKRONISASI COURSE SAAT EDIT
-      // ========================================================
 
       if (_selectedCourseId != null) {
         QueryDocumentSnapshot<Map<String, dynamic>>?
@@ -426,10 +325,6 @@ class _TeacherMaterialFormScreenState
     String? classId;
     String? className;
 
-    // ----------------------------------------------------------
-    // CLASS DARI COURSE
-    // ----------------------------------------------------------
-
     final courseClassId =
     (data['classId'] ?? '').toString();
 
@@ -447,10 +342,6 @@ class _TeacherMaterialFormScreenState
       }
     }
 
-    // ----------------------------------------------------------
-    // GUNAKAN CLASS LAMA JIKA ID SAMA
-    // ----------------------------------------------------------
-
     if (classId != null &&
         className == null &&
         _selectedClassId == classId &&
@@ -458,10 +349,6 @@ class _TeacherMaterialFormScreenState
         _selectedClassName!.isNotEmpty) {
       className = _selectedClassName;
     }
-
-    // ----------------------------------------------------------
-    // PERTAHANKAN CLASS LAMA SAAT EDIT
-    // ----------------------------------------------------------
 
     if (classId == null) {
       if (_isEdit &&
@@ -551,14 +438,8 @@ class _TeacherMaterialFormScreenState
         _showMessage(
           'File video tidak dapat diakses.',
         );
-
         return;
       }
-
-      // ========================================================
-      // AMBIL UKURAN DARI FILE SYSTEM
-      // Tidak menggunakan PlatformFile.size
-      // ========================================================
 
       final localFile = File(path);
 
@@ -566,22 +447,16 @@ class _TeacherMaterialFormScreenState
         _showMessage(
           'File video tidak ditemukan.',
         );
-
         return;
       }
 
       final int fileSize =
       await localFile.length();
 
-      // ========================================================
-      // VALIDASI MAKSIMAL 100 MB
-      // ========================================================
-
       if (fileSize > _maxVideoSize) {
         _showMessage(
           'Ukuran video maksimal 100 MB.',
         );
-
         return;
       }
 
@@ -661,6 +536,170 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
+  // GET NEXT LESSON ORDER
+  // ============================================================
+
+  Future<int> _getNextLessonOrder() async {
+    if (_selectedCourseId == null ||
+        _selectedCourseId!.isEmpty) {
+      return 1;
+    }
+
+    final snapshot = await _firestore
+        .collection('course_lessons')
+        .where(
+      'courseId',
+      isEqualTo: _selectedCourseId,
+    )
+        .where(
+      'teacherId',
+      isEqualTo: _fixedTeacherId,
+    )
+        .get();
+
+    int maxOrder = 0;
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+
+      final value = data['order'];
+
+      if (value is int) {
+        if (value > maxOrder) {
+          maxOrder = value;
+        }
+      } else if (value is num) {
+        final order = value.toInt();
+
+        if (order > maxOrder) {
+          maxOrder = order;
+        }
+      }
+    }
+
+    return maxOrder + 1;
+  }
+
+  // ============================================================
+  // SAVE / UPDATE COURSE LESSON VIDEO
+  // ============================================================
+
+  Future<void> _saveCourseLesson({
+    required String videoUrl,
+    required String videoFileName,
+    required int videoSize,
+    required Timestamp now,
+  }) async {
+    if (_selectedCourseId == null ||
+        _selectedCourseId!.isEmpty) {
+      return;
+    }
+
+    const teacherId = _fixedTeacherId;
+
+    // ==========================================================
+    // CARI LESSON YANG SUDAH ADA
+    //
+    // Kita hanya filter courseId + teacherId.
+    // Setelah itu pencocokan title dilakukan di Dart agar
+    // tidak bergantung pada composite index tambahan.
+    // ==========================================================
+
+    final existingLessonsSnapshot =
+    await _firestore
+        .collection('course_lessons')
+        .where(
+      'courseId',
+      isEqualTo: _selectedCourseId,
+    )
+        .where(
+      'teacherId',
+      isEqualTo: teacherId,
+    )
+        .get();
+
+    QueryDocumentSnapshot<Map<String, dynamic>>?
+    existingLesson;
+
+    final currentTitle =
+    _titleController.text.trim();
+
+    // Saat edit, coba cari lesson berdasarkan judul.
+    for (final doc in existingLessonsSnapshot.docs) {
+      final data = doc.data();
+
+      final lessonTitle =
+      (data['title'] ?? '').toString().trim();
+
+      if (lessonTitle == currentTitle) {
+        existingLesson = doc;
+        break;
+      }
+    }
+
+    // ==========================================================
+    // DATA COURSE LESSON
+    // ==========================================================
+
+    final lessonData = <String, dynamic>{
+      'teacherId': teacherId,
+      'teacherName': _teacherName,
+
+      'courseId': _selectedCourseId,
+      'courseName': _selectedCourseName ?? '',
+
+      'classId': _selectedClassId,
+      'className': _selectedClassName ?? '',
+
+      'title': currentTitle,
+
+      'content':
+      _contentController.text.trim(),
+
+      'description':
+      _descriptionController.text.trim(),
+
+      'videoUrl': videoUrl,
+
+      'videoFileName': videoFileName,
+
+      'videoSize': videoSize,
+
+      'duration': 0,
+
+      'updatedAt': now,
+    };
+
+    // ==========================================================
+    // UPDATE LESSON
+    // ==========================================================
+
+    if (existingLesson != null) {
+      await _firestore
+          .collection('course_lessons')
+          .doc(existingLesson.id)
+          .update(lessonData);
+
+      return;
+    }
+
+    // ==========================================================
+    // CREATE LESSON BARU
+    // ==========================================================
+
+    final nextOrder =
+    await _getNextLessonOrder();
+
+    await _firestore
+        .collection('course_lessons')
+        .add({
+      ...lessonData,
+      'order': nextOrder,
+      'createdAt': now,
+    });
+  }
+
+  // ============================================================
   // SAVE MATERIAL
   // ============================================================
 
@@ -687,37 +726,7 @@ class _TeacherMaterialFormScreenState
       return;
     }
 
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      _showMessage(
-        'Anda belum login.',
-      );
-
-      return;
-    }
-
-    // ==========================================================
-    // PASTIKAN TEACHER ID CANONICAL
-    // ==========================================================
-
-    String? teacherId = _teacherId;
-
-    if (teacherId == null ||
-        teacherId.isEmpty) {
-      teacherId =
-      await _getTeacherDocumentId();
-    }
-
-    if (teacherId == null ||
-        teacherId.isEmpty) {
-      _showMessage(
-        'Data guru tidak ditemukan. '
-            'Pastikan akun Anda sudah terhubung dengan data guru.',
-      );
-
-      return;
-    }
+    const String teacherId = _fixedTeacherId;
 
     if (!mounted) return;
 
@@ -751,12 +760,9 @@ class _TeacherMaterialFormScreenState
         videoFileName =
             _selectedVideo!.name;
 
-        // Ambil ukuran dari state yang sudah
-        // dihitung ketika memilih video.
         videoSize =
             _selectedVideoSize;
 
-        // Fallback apabila ukuran belum tersedia.
         if (videoSize == null) {
           final path =
               _selectedVideo!.path;
@@ -782,16 +788,8 @@ class _TeacherMaterialFormScreenState
 
       final materialData =
       <String, dynamic>{
-        // ------------------------------------------------------
-        // GURU
-        // ------------------------------------------------------
-
         'teacherId': teacherId,
         'teacherName': _teacherName,
-
-        // ------------------------------------------------------
-        // MATERI
-        // ------------------------------------------------------
 
         'title':
         _titleController.text.trim(),
@@ -802,29 +800,17 @@ class _TeacherMaterialFormScreenState
         'content':
         _contentController.text.trim(),
 
-        // ------------------------------------------------------
-        // COURSE
-        // ------------------------------------------------------
-
         'courseId':
         _selectedCourseId,
 
         'courseName':
         _selectedCourseName ?? '',
 
-        // ------------------------------------------------------
-        // KELAS
-        // ------------------------------------------------------
-
         'classId':
         _selectedClassId,
 
         'className':
         _selectedClassName ?? '',
-
-        // ------------------------------------------------------
-        // VIDEO
-        // ------------------------------------------------------
 
         'videoUrl':
         videoUrl ?? '',
@@ -835,22 +821,15 @@ class _TeacherMaterialFormScreenState
         'videoSize':
         videoSize ?? 0,
 
-        // ------------------------------------------------------
-        // LAMPIRAN
-        // ------------------------------------------------------
-
         'attachmentUrl':
         _attachmentUrlController.text.trim(),
 
-        // ------------------------------------------------------
-        // UPDATED
-        // ------------------------------------------------------
-
-        'updatedAt': now,
+        'updatedAt':
+        now,
       };
 
       // ========================================================
-      // EDIT
+      // SIMPAN MATERIAL
       // ========================================================
 
       if (_isEdit) {
@@ -858,13 +837,7 @@ class _TeacherMaterialFormScreenState
             .collection('materials')
             .doc(widget.materialId)
             .update(materialData);
-      }
-
-      // ========================================================
-      // TAMBAH
-      // ========================================================
-
-      else {
+      } else {
         await _firestore
             .collection('materials')
             .add({
@@ -872,6 +845,32 @@ class _TeacherMaterialFormScreenState
           'createdAt': now,
         });
       }
+
+      // ========================================================
+      // SINKRONKAN VIDEO KE COURSE LESSONS
+      //
+      // HANYA jika memang ada video.
+      // ========================================================
+
+      if (videoUrl != null &&
+          videoUrl.trim().isNotEmpty) {
+        _showMessage(
+          'Menyimpan video ke course...',
+        );
+
+        await _saveCourseLesson(
+          videoUrl: videoUrl,
+          videoFileName:
+          videoFileName ?? '',
+          videoSize:
+          videoSize ?? 0,
+          now: now,
+        );
+      }
+
+      // ========================================================
+      // SELESAI
+      // ========================================================
 
       if (!mounted) return;
 
@@ -1243,10 +1242,6 @@ class _TeacherMaterialFormScreenState
         crossAxisAlignment:
         CrossAxisAlignment.start,
         children: [
-          // ======================================================
-          // HEADER
-          // ======================================================
-
           Row(
             children: [
               Icon(
@@ -1281,10 +1276,6 @@ class _TeacherMaterialFormScreenState
           ),
 
           const SizedBox(height: 14),
-
-          // ======================================================
-          // VIDEO BARU
-          // ======================================================
 
           if (hasNewVideo)
             Container(
@@ -1348,11 +1339,6 @@ class _TeacherMaterialFormScreenState
                 ],
               ),
             )
-
-          // ======================================================
-          // VIDEO LAMA
-          // ======================================================
-
           else if (hasExistingVideo)
             Container(
               padding:
@@ -1415,11 +1401,6 @@ class _TeacherMaterialFormScreenState
                 ],
               ),
             )
-
-          // ======================================================
-          // BELUM ADA VIDEO
-          // ======================================================
-
           else
             Container(
               padding:
@@ -1455,10 +1436,6 @@ class _TeacherMaterialFormScreenState
             ),
 
           const SizedBox(height: 14),
-
-          // ======================================================
-          // BUTTON VIDEO
-          // ======================================================
 
           SizedBox(
             width: double.infinity,

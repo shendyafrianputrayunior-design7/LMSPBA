@@ -17,8 +17,145 @@ class TeacherAssignmentsScreen extends StatefulWidget {
 class _TeacherAssignmentsScreenState
     extends State<TeacherAssignmentsScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  String? _teacherId;
+  bool _loadingTeacher = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTeacherId();
+  }
+
+  // ============================================================
+  // GET TEACHER DOCUMENT ID
+  // ============================================================
+
+  Future<String?> _getTeacherDocumentId() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return null;
+    }
+
+    try {
+      // --------------------------------------------------------
+      // 1. users/{uid}.teacherId
+      // --------------------------------------------------------
+
+      final userDoc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final userData = userDoc.data();
+
+      final teacherIdFromUser =
+      userData?['teacherId']?.toString().trim();
+
+      if (teacherIdFromUser != null &&
+          teacherIdFromUser.isNotEmpty) {
+        final teacherDoc = await _firestore
+            .collection('teachers')
+            .doc(teacherIdFromUser)
+            .get();
+
+        if (teacherDoc.exists) {
+          return teacherIdFromUser;
+        }
+      }
+
+      // --------------------------------------------------------
+      // 2. FALLBACK EMAIL
+      // --------------------------------------------------------
+
+      final email = user.email?.trim();
+
+      if (email != null && email.isNotEmpty) {
+        final teacherQuery = await _firestore
+            .collection('teachers')
+            .where(
+          'email',
+          isEqualTo: email,
+        )
+            .limit(1)
+            .get();
+
+        if (teacherQuery.docs.isNotEmpty) {
+          return teacherQuery.docs.first.id;
+        }
+      }
+    } catch (e) {
+      debugPrint(
+        'Error get teacher document ID: $e',
+      );
+    }
+
+    return null;
+  }
+
+  // ============================================================
+  // LOAD TEACHER
+  // ============================================================
+
+  Future<void> _loadTeacherId() async {
+    if (mounted) {
+      setState(() {
+        _loadingTeacher = true;
+      });
+    }
+
+    final teacherId = await _getTeacherDocumentId();
+
+    if (!mounted) return;
+
+    setState(() {
+      _teacherId = teacherId;
+      _loadingTeacher = false;
+    });
+  }
+
+  // ============================================================
+  // ASSIGNMENT STREAM
+  // ============================================================
+
+  Stream<QuerySnapshot<Map<String, dynamic>>>
+  _assignmentStream() {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return const Stream.empty();
+    }
+
+    final uid = user.uid;
+    final teacherId = _teacherId;
+
+    // Kalau teacherId canonical tersedia,
+    // ambil data dengan teacherId canonical dan UID lama.
+    if (teacherId != null &&
+        teacherId.isNotEmpty &&
+        teacherId != uid) {
+      return _firestore
+          .collection('assignments')
+          .where(
+        'teacherId',
+        whereIn: [
+          teacherId,
+          uid,
+        ],
+      )
+          .snapshots();
+    }
+
+    return _firestore
+        .collection('assignments')
+        .where(
+      'teacherId',
+      isEqualTo: teacherId ?? uid,
+    )
+        .snapshots();
+  }
 
   // ============================================================
   // TAMBAH / EDIT ASSIGNMENT
@@ -85,7 +222,7 @@ class _TeacherAssignmentsScreenState
   }
 
   // ============================================================
-  // LIHAT PENGUMPULAN SISWA
+  // LIHAT PENGUMPULAN
   // ============================================================
 
   Future<void> _openAssignmentSubmissions(
@@ -135,10 +272,9 @@ class _TeacherAssignmentsScreenState
 
   @override
   Widget build(BuildContext context) {
-    final user = _auth.currentUser;
     final theme = Theme.of(context);
 
-    if (user == null) {
+    if (_auth.currentUser == null) {
       return const Scaffold(
         body: Center(
           child: Text(
@@ -153,6 +289,11 @@ class _TeacherAssignmentsScreenState
         title: const Text('Assignments'),
         actions: [
           IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loadTeacherId,
+            icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
             tooltip: 'Tambah Assignment',
             onPressed: () {
               _openAssignmentForm();
@@ -162,20 +303,34 @@ class _TeacherAssignmentsScreenState
         ],
       ),
 
-      // ============================================================
-      // DAFTAR ASSIGNMENT
-      // ============================================================
+      // ========================================================
+      // FLOATING BUTTON
+      // ========================================================
 
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _firestore
-            .collection('assignments')
-            .where(
-          'teacherId',
-          isEqualTo: user.uid,
-        )
-            .snapshots(),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _loadingTeacher || _teacherId == null
+            ? null
+            : () {
+          _openAssignmentForm();
+        },
+        icon: const Icon(Icons.add),
+        label: const Text('Assignment'),
+      ),
+
+      // ========================================================
+      // BODY
+      // ========================================================
+
+      body: _loadingTeacher
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : _teacherId == null
+          ? _buildTeacherNotFound(theme)
+          : StreamBuilder<
+          QuerySnapshot<Map<String, dynamic>>>(
+        stream: _assignmentStream(),
         builder: (context, snapshot) {
-          // LOADING
           if (snapshot.connectionState ==
               ConnectionState.waiting) {
             return const Center(
@@ -183,47 +338,20 @@ class _TeacherAssignmentsScreenState
             );
           }
 
-          // ERROR
           if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: theme.colorScheme.error,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Gagal mengambil data assignment.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${snapshot.error}',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
+            return _buildError(
+              theme,
+              snapshot.error.toString(),
             );
           }
 
-          final docs = snapshot.data?.docs ?? [];
+          final docs =
+              snapshot.data?.docs ?? [];
 
-          // KOSONG
           if (docs.isEmpty) {
             return _buildEmptyState(theme);
           }
 
-          // DAFTAR
           return ListView.builder(
             padding: const EdgeInsets.fromLTRB(
               16,
@@ -234,28 +362,102 @@ class _TeacherAssignmentsScreenState
             itemCount: docs.length,
             itemBuilder: (context, index) {
               final doc = docs[index];
-              final data = doc.data();
 
               return _buildAssignmentCard(
                 doc.id,
-                data,
+                doc.data(),
                 theme,
               );
             },
           );
         },
       ),
+    );
+  }
 
-      // ============================================================
-      // FLOATING BUTTON
-      // ============================================================
+  // ============================================================
+  // TEACHER NOT FOUND
+  // ============================================================
 
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          _openAssignmentForm();
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Assignment'),
+  Widget _buildTeacherNotFound(ThemeData theme) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.person_off_outlined,
+              size: 64,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Data Guru Tidak Ditemukan',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Akun guru belum terhubung dengan data teachers.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: _loadTeacherId,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ERROR
+  // ============================================================
+
+  Widget _buildError(
+      ThemeData theme,
+      String error,
+      ) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Gagal mengambil data assignment.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              error,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: _loadTeacherId,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -281,12 +483,11 @@ class _TeacherAssignmentsScreenState
               child: Icon(
                 Icons.assignment_outlined,
                 size: 52,
-                color: theme.colorScheme.onPrimaryContainer,
+                color:
+                theme.colorScheme.onPrimaryContainer,
               ),
             ),
-
             const SizedBox(height: 20),
-
             Text(
               'Belum ada Assignment',
               textAlign: TextAlign.center,
@@ -294,17 +495,13 @@ class _TeacherAssignmentsScreenState
                 fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'Buat tugas pertama untuk siswa Anda.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),
-
             const SizedBox(height: 24),
-
             FilledButton.icon(
               onPressed: () {
                 _openAssignmentForm();
@@ -362,10 +559,6 @@ class _TeacherAssignmentsScreenState
           crossAxisAlignment:
           CrossAxisAlignment.start,
           children: [
-            // ======================================================
-            // HEADER
-            // ======================================================
-
             Row(
               crossAxisAlignment:
               CrossAxisAlignment.start,
@@ -374,9 +567,8 @@ class _TeacherAssignmentsScreenState
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: theme
-                        .colorScheme
-                        .primaryContainer,
+                    color:
+                    theme.colorScheme.primaryContainer,
                     borderRadius:
                     BorderRadius.circular(14),
                   ),
@@ -387,9 +579,7 @@ class _TeacherAssignmentsScreenState
                         .onPrimaryContainer,
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment:
@@ -408,10 +598,8 @@ class _TeacherAssignmentsScreenState
                           FontWeight.bold,
                         ),
                       ),
-
                       if (courseTitle.isNotEmpty) ...[
                         const SizedBox(height: 4),
-
                         Text(
                           courseTitle,
                           maxLines: 1,
@@ -421,9 +609,8 @@ class _TeacherAssignmentsScreenState
                               .textTheme
                               .bodySmall
                               ?.copyWith(
-                            color: theme
-                                .colorScheme
-                                .primary,
+                            color:
+                            theme.colorScheme.primary,
                             fontWeight:
                             FontWeight.w600,
                           ),
@@ -432,11 +619,6 @@ class _TeacherAssignmentsScreenState
                     ],
                   ),
                 ),
-
-                // ==================================================
-                // MENU EDIT / DELETE
-                // ==================================================
-
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'edit') {
@@ -485,13 +667,8 @@ class _TeacherAssignmentsScreenState
               ],
             ),
 
-            // ======================================================
-            // DESCRIPTION
-            // ======================================================
-
             if (description.isNotEmpty) ...[
               const SizedBox(height: 14),
-
               Text(
                 description,
                 maxLines: 3,
@@ -504,10 +681,6 @@ class _TeacherAssignmentsScreenState
 
             const SizedBox(height: 14),
 
-            // ======================================================
-            // INFO
-            // ======================================================
-
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -516,12 +689,10 @@ class _TeacherAssignmentsScreenState
                   icon: Icons.groups_outlined,
                   text: classId,
                 ),
-
                 _InfoChip(
                   icon: Icons.star_outline,
                   text: '$points poin',
                 ),
-
                 _InfoChip(
                   icon:
                   Icons.calendar_today_outlined,
@@ -532,10 +703,6 @@ class _TeacherAssignmentsScreenState
             ),
 
             const SizedBox(height: 14),
-
-            // ======================================================
-            // LIHAT PENGUMPULAN SISWA
-            // ======================================================
 
             SizedBox(
               width: double.infinity,
@@ -598,12 +765,11 @@ class _InfoChip extends StatelessWidget {
             color:
             theme.colorScheme.onSurfaceVariant,
           ),
-
           const SizedBox(width: 6),
-
           Text(
             text,
-            style: theme.textTheme.bodySmall,
+            style:
+            theme.textTheme.bodySmall,
           ),
         ],
       ),

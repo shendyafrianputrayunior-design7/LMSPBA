@@ -76,22 +76,32 @@ class _TeacherAssignmentFormScreenState
       _dueDate = existingDueDate;
     }
 
-    _selectedCourseId =
-    (data?['courseId'] ?? '').toString().isEmpty
-        ? null
-        : data?['courseId'].toString();
+    final existingCourseId = (data?['courseId'] ?? '').toString().trim();
 
-    _selectedCourseTitle =
+    if (existingCourseId.isNotEmpty) {
+      _selectedCourseId = existingCourseId;
+    }
+
+    final existingCourseTitle =
     (data?['courseTitle'] ?? data?['courseName'] ?? '')
         .toString()
-        .isEmpty
-        ? null
-        : (data?['courseTitle'] ?? data?['courseName']).toString();
+        .trim();
 
-    _selectedClassId =
-    (data?['classId'] ?? '').toString().isEmpty
-        ? null
-        : data?['classId'].toString();
+    if (existingCourseTitle.isNotEmpty) {
+      _selectedCourseTitle = existingCourseTitle;
+    }
+
+    final existingClassId = (data?['classId'] ?? '').toString().trim();
+
+    if (existingClassId.isNotEmpty) {
+      _selectedClassId = existingClassId;
+    }
+
+    final existingClassName = (data?['className'] ?? '').toString().trim();
+
+    if (existingClassName.isNotEmpty) {
+      _selectedClassName = existingClassName;
+    }
 
     _loadCourses();
     _loadClasses();
@@ -108,6 +118,73 @@ class _TeacherAssignmentFormScreenState
   }
 
   // ============================================================
+  // GET TEACHER DOCUMENT ID
+  // ============================================================
+
+  Future<String?> _getTeacherDocumentId() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return null;
+    }
+
+    try {
+      // ----------------------------------------------------------
+      // 1. Cek users/{uid}.teacherId
+      // ----------------------------------------------------------
+
+      final userDoc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final userData = userDoc.data();
+
+      final teacherIdFromUser =
+      userData?['teacherId']?.toString().trim();
+
+      if (teacherIdFromUser != null &&
+          teacherIdFromUser.isNotEmpty) {
+        final teacherDoc = await _firestore
+            .collection('teachers')
+            .doc(teacherIdFromUser)
+            .get();
+
+        if (teacherDoc.exists) {
+          return teacherIdFromUser;
+        }
+      }
+
+      // ----------------------------------------------------------
+      // 2. Fallback berdasarkan email
+      // ----------------------------------------------------------
+
+      final email = user.email?.trim();
+
+      if (email != null && email.isNotEmpty) {
+        final teacherQuery = await _firestore
+            .collection('teachers')
+            .where(
+          'email',
+          isEqualTo: email,
+        )
+            .limit(1)
+            .get();
+
+        if (teacherQuery.docs.isNotEmpty) {
+          return teacherQuery.docs.first.id;
+        }
+      }
+    } catch (e) {
+      debugPrint(
+        'Gagal mencari teacher document ID: $e',
+      );
+    }
+
+    return null;
+  }
+
+  // ============================================================
   // LOAD COURSES
   // ============================================================
 
@@ -120,18 +197,63 @@ class _TeacherAssignmentFormScreenState
           _loadingCourses = false;
         });
       }
+
       return;
     }
 
     try {
-      final snapshot = await _firestore
-          .collection('courses')
-          .where('teacherId', isEqualTo: user.uid)
-          .get();
+      final teacherDocumentId = await _getTeacherDocumentId();
 
-      if (!mounted) return;
+      QuerySnapshot<Map<String, dynamic>> snapshot;
 
-      final courses = snapshot.docs.toList();
+      // ----------------------------------------------------------
+      // Gunakan teacher document ID sebagai data utama.
+      // ----------------------------------------------------------
+
+      if (teacherDocumentId != null &&
+          teacherDocumentId.isNotEmpty) {
+        snapshot = await _firestore
+            .collection('courses')
+            .where(
+          'teacherId',
+          isEqualTo: teacherDocumentId,
+        )
+            .get();
+      } else {
+        // --------------------------------------------------------
+        // Fallback untuk data lama yang masih menggunakan UID.
+        // Tidak mengubah data lama.
+        // --------------------------------------------------------
+
+        snapshot = await _firestore
+            .collection('courses')
+            .where(
+          'teacherId',
+          isEqualTo: user.uid,
+        )
+            .get();
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      // ----------------------------------------------------------
+      // Hapus kemungkinan duplikasi berdasarkan document ID.
+      // ----------------------------------------------------------
+
+      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>>
+      uniqueCourses = {};
+
+      for (final course in snapshot.docs) {
+        uniqueCourses[course.id] = course;
+      }
+
+      final courses = uniqueCourses.values.toList();
+
+      // ----------------------------------------------------------
+      // Urutkan berdasarkan nama course.
+      // ----------------------------------------------------------
 
       courses.sort((a, b) {
         final titleA =
@@ -143,33 +265,65 @@ class _TeacherAssignmentFormScreenState
         return titleA.compareTo(titleB);
       });
 
-      setState(() {
-        _courses = courses;
-        _loadingCourses = false;
-      });
+      // ----------------------------------------------------------
+      // Sinkronisasi course ketika edit.
+      // ----------------------------------------------------------
 
-      // Sinkronisasi data course saat edit
-      if (_selectedCourseId != null) {
-        final existingCourses = courses.where(
-              (course) => course.id == _selectedCourseId,
-        );
+      String? validSelectedCourseId = _selectedCourseId;
+      String? validSelectedCourseTitle = _selectedCourseTitle;
 
-        if (existingCourses.isNotEmpty) {
-          final course = existingCourses.first;
-          final data = course.data();
+      if (validSelectedCourseId != null) {
+        QueryDocumentSnapshot<Map<String, dynamic>>? selectedCourse;
 
-          setState(() {
-            _selectedCourseId = course.id;
-            _selectedCourseTitle =
-                (data['title'] ?? '').toString();
-          });
+        for (final course in courses) {
+          if (course.id == validSelectedCourseId) {
+            selectedCourse = course;
+            break;
+          }
+        }
+
+        if (selectedCourse != null) {
+          final courseData = selectedCourse.data();
+
+          validSelectedCourseId = selectedCourse.id;
+
+          validSelectedCourseTitle =
+              (courseData['title'] ?? 'Course tanpa nama')
+                  .toString()
+                  .trim();
+
+          if (validSelectedCourseTitle!.isEmpty) {
+            validSelectedCourseTitle = 'Course tanpa nama';
+          }
+        } else {
+          // ------------------------------------------------------
+          // Course lama tidak ditemukan.
+          //
+          // Jangan memasukkan ID tersebut ke DropdownButton,
+          // karena akan menyebabkan assertion Flutter.
+          // ------------------------------------------------------
+
+          validSelectedCourseId = null;
+          validSelectedCourseTitle = null;
         }
       }
+
+      setState(() {
+        _courses = courses;
+        _selectedCourseId = validSelectedCourseId;
+        _selectedCourseTitle = validSelectedCourseTitle;
+        _loadingCourses = false;
+      });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _loadingCourses = false;
+        _courses = [];
+        _selectedCourseId = null;
+        _selectedCourseTitle = null;
       });
 
       _showMessage(
@@ -188,9 +342,22 @@ class _TeacherAssignmentFormScreenState
           .collection('classes')
           .get();
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
-      final classes = snapshot.docs.toList();
+      // ----------------------------------------------------------
+      // Hilangkan duplikasi berdasarkan document ID.
+      // ----------------------------------------------------------
+
+      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>>
+      uniqueClasses = {};
+
+      for (final classDoc in snapshot.docs) {
+        uniqueClasses[classDoc.id] = classDoc;
+      }
+
+      final classes = uniqueClasses.values.toList();
 
       classes.sort((a, b) {
         final nameA = _getClassName(a).toLowerCase();
@@ -199,31 +366,48 @@ class _TeacherAssignmentFormScreenState
         return nameA.compareTo(nameB);
       });
 
-      setState(() {
-        _classes = classes;
-        _loadingClasses = false;
-      });
+      // ----------------------------------------------------------
+      // Sinkronisasi kelas ketika edit.
+      // ----------------------------------------------------------
 
-      // Sinkronisasi data kelas saat edit
-      if (_selectedClassId != null) {
-        final existingClasses = classes.where(
-              (item) => item.id == _selectedClassId,
-        );
+      String? validSelectedClassId = _selectedClassId;
+      String? validSelectedClassName = _selectedClassName;
 
-        if (existingClasses.isNotEmpty) {
-          final selected = existingClasses.first;
+      if (validSelectedClassId != null) {
+        QueryDocumentSnapshot<Map<String, dynamic>>? selectedClass;
 
-          setState(() {
-            _selectedClassId = selected.id;
-            _selectedClassName = _getClassName(selected);
-          });
+        for (final classDoc in classes) {
+          if (classDoc.id == validSelectedClassId) {
+            selectedClass = classDoc;
+            break;
+          }
+        }
+
+        if (selectedClass != null) {
+          validSelectedClassId = selectedClass.id;
+          validSelectedClassName = _getClassName(selectedClass);
+        } else {
+          validSelectedClassId = null;
+          validSelectedClassName = null;
         }
       }
+
+      setState(() {
+        _classes = classes;
+        _selectedClassId = validSelectedClassId;
+        _selectedClassName = validSelectedClassName;
+        _loadingClasses = false;
+      });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _loadingClasses = false;
+        _classes = [];
+        _selectedClassId = null;
+        _selectedClassName = null;
       });
 
       _showMessage(
@@ -259,7 +443,8 @@ class _TeacherAssignmentFormScreenState
       ) {
     final data = course.data();
 
-    final title = (data['title'] ?? '').toString().trim();
+    final title =
+    (data['title'] ?? '').toString().trim();
 
     setState(() {
       _selectedCourseId = course.id;
@@ -335,7 +520,10 @@ class _TeacherAssignmentFormScreenState
 
     try {
       final points =
-          int.tryParse(_pointsController.text.trim()) ?? 100;
+          int.tryParse(
+            _pointsController.text.trim(),
+          ) ??
+              100;
 
       final userDoc = await _firestore
           .collection('users')
@@ -352,34 +540,61 @@ class _TeacherAssignmentFormScreenState
           'Guru')
           .toString();
 
+      // ----------------------------------------------------------
+      // Ambil teacher document ID.
+      // ----------------------------------------------------------
+
+      final teacherDocumentId =
+      await _getTeacherDocumentId();
+
+      // ----------------------------------------------------------
+      // Data assignment
+      // ----------------------------------------------------------
+
       final data = <String, dynamic>{
         'title': _titleController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'instructions': _instructionsController.text.trim(),
 
-        // ======================================================
+        'description':
+        _descriptionController.text.trim(),
+
+        'instructions':
+        _instructionsController.text.trim(),
+
+        // --------------------------------------------------------
         // COURSE
-        // ======================================================
+        // --------------------------------------------------------
 
         'courseId': _selectedCourseId,
         'courseTitle': _selectedCourseTitle,
 
-        // ======================================================
+        // --------------------------------------------------------
         // CLASS
-        // ======================================================
+        // --------------------------------------------------------
 
         'classId': _selectedClassId,
         'className': _selectedClassName,
 
-        // ======================================================
+        // --------------------------------------------------------
         // OTHER DATA
-        // ======================================================
+        // --------------------------------------------------------
 
         'points': points,
-        'teacherId': user.uid,
+
+        // Gunakan teacher document ID jika tersedia.
+        // Jika tidak ditemukan, pertahankan UID sebagai
+        // fallback agar proses tidak gagal.
+        'teacherId':
+        teacherDocumentId ?? user.uid,
+
         'teacherName': teacherName,
-        'updatedAt': FieldValue.serverTimestamp(),
+
+        'updatedAt':
+        FieldValue.serverTimestamp(),
       };
+
+      // ----------------------------------------------------------
+      // DEADLINE
+      // ----------------------------------------------------------
 
       if (_dueDate != null) {
         data['dueDate'] =
@@ -388,9 +603,9 @@ class _TeacherAssignmentFormScreenState
         data['dueDate'] = null;
       }
 
-      // ========================================================
+      // ----------------------------------------------------------
       // ADD
-      // ========================================================
+      // ----------------------------------------------------------
 
       if (widget.assignmentId == null) {
         data['createdAt'] =
@@ -401,9 +616,9 @@ class _TeacherAssignmentFormScreenState
             .add(data);
       }
 
-      // ========================================================
+      // ----------------------------------------------------------
       // EDIT
-      // ========================================================
+      // ----------------------------------------------------------
 
       else {
         await _firestore
@@ -412,11 +627,15 @@ class _TeacherAssignmentFormScreenState
             .update(data);
       }
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       Navigator.pop(context, true);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _saving = false;
@@ -433,6 +652,10 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   void _showMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -469,7 +692,9 @@ class _TeacherAssignmentFormScreenState
   // COURSE & CLASS SECTION
   // ============================================================
 
-  Widget _buildCourseClassSection(ThemeData theme) {
+  Widget _buildCourseClassSection(
+      ThemeData theme,
+      ) {
     if (_loadingCourses || _loadingClasses) {
       return Card(
         margin: EdgeInsets.zero,
@@ -482,7 +707,8 @@ class _TeacherAssignmentFormScreenState
                 height: 22,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: theme.colorScheme.primary,
+                  color:
+                  theme.colorScheme.primary,
                 ),
               ),
               const SizedBox(width: 12),
@@ -552,6 +778,42 @@ class _TeacherAssignmentFormScreenState
       );
     }
 
+    // ============================================================
+    // VALIDASI VALUE COURSE UNTUK DROPDOWN
+    // ============================================================
+
+    String? courseDropdownValue;
+
+    if (_selectedCourseId != null) {
+      final matchingCourses = _courses.where(
+            (course) =>
+        course.id == _selectedCourseId,
+      );
+
+      if (matchingCourses.length == 1) {
+        courseDropdownValue =
+            _selectedCourseId;
+      }
+    }
+
+    // ============================================================
+    // VALIDASI VALUE CLASS UNTUK DROPDOWN
+    // ============================================================
+
+    String? classDropdownValue;
+
+    if (_selectedClassId != null) {
+      final matchingClasses = _classes.where(
+            (classDoc) =>
+        classDoc.id == _selectedClassId,
+      );
+
+      if (matchingClasses.length == 1) {
+        classDropdownValue =
+            _selectedClassId;
+      }
+    }
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -560,18 +822,26 @@ class _TeacherAssignmentFormScreenState
           crossAxisAlignment:
           CrossAxisAlignment.start,
           children: [
+            // ======================================================
+            // HEADER
+            // ======================================================
+
             Row(
               children: [
                 Icon(
                   Icons.menu_book_outlined,
-                  color: theme.colorScheme.primary,
+                  color:
+                  theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   'Course & Kelas',
-                  style:
-                  theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                  style: theme
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(
+                    fontWeight:
+                    FontWeight.bold,
                   ),
                 ),
               ],
@@ -579,14 +849,15 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ==================================================
+            // ======================================================
             // COURSE
-            // ==================================================
+            // ======================================================
 
             DropdownButtonFormField<String>(
-              value: _selectedCourseId,
+              value: courseDropdownValue,
               isExpanded: true,
-              decoration: const InputDecoration(
+              decoration:
+              const InputDecoration(
                 labelText: 'Pilih Course',
                 prefixIcon: Icon(
                   Icons.library_books_outlined,
@@ -616,15 +887,24 @@ class _TeacherAssignmentFormScreenState
                   return;
                 }
 
-                final selected =
-                _courses.firstWhere(
-                      (course) =>
-                  course.id == courseId,
-                );
+                QueryDocumentSnapshot<
+                    Map<String, dynamic>>?
+                selected;
 
-                _setSelectedCourse(
-                  selected,
-                );
+                for (final course
+                in _courses) {
+                  if (course.id ==
+                      courseId) {
+                    selected = course;
+                    break;
+                  }
+                }
+
+                if (selected != null) {
+                  _setSelectedCourse(
+                    selected,
+                  );
+                }
               },
               validator: (value) {
                 if (value == null ||
@@ -638,14 +918,15 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ==================================================
+            // ======================================================
             // CLASS
-            // ==================================================
+            // ======================================================
 
             DropdownButtonFormField<String>(
-              value: _selectedClassId,
+              value: classDropdownValue,
               isExpanded: true,
-              decoration: const InputDecoration(
+              decoration:
+              const InputDecoration(
                 labelText: 'Pilih Kelas',
                 prefixIcon: Icon(
                   Icons.groups_outlined,
@@ -668,15 +949,24 @@ class _TeacherAssignmentFormScreenState
                   return;
                 }
 
-                final selected =
-                _classes.firstWhere(
-                      (classDoc) =>
-                  classDoc.id == classId,
-                );
+                QueryDocumentSnapshot<
+                    Map<String, dynamic>>?
+                selected;
 
-                _setSelectedClass(
-                  selected,
-                );
+                for (final classDoc
+                in _classes) {
+                  if (classDoc.id ==
+                      classId) {
+                    selected = classDoc;
+                    break;
+                  }
+                }
+
+                if (selected != null) {
+                  _setSelectedClass(
+                    selected,
+                  );
+                }
               },
               validator: (value) {
                 if (value == null ||
@@ -689,6 +979,10 @@ class _TeacherAssignmentFormScreenState
             ),
 
             const SizedBox(height: 12),
+
+            // ======================================================
+            // INFORMATION
+            // ======================================================
 
             Container(
               width: double.infinity,
@@ -736,7 +1030,9 @@ class _TeacherAssignmentFormScreenState
   // DATE SECTION
   // ============================================================
 
-  Widget _buildDateSection(ThemeData theme) {
+  Widget _buildDateSection(
+      ThemeData theme,
+      ) {
     final today = DateTime(
       DateTime.now().year,
       DateTime.now().month,
@@ -768,9 +1064,12 @@ class _TeacherAssignmentFormScreenState
                 const SizedBox(width: 10),
                 Text(
                   'Deadline',
-                  style:
-                  theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                  style: theme
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(
+                    fontWeight:
+                    FontWeight.bold,
                   ),
                 ),
               ],
@@ -837,9 +1136,8 @@ class _TeacherAssignmentFormScreenState
                           _dueDate = null;
                         });
                       },
-                      icon: const Icon(
-                        Icons.close,
-                      ),
+                      icon:
+                      const Icon(Icons.close),
                     ),
                 ],
               ),
@@ -869,19 +1167,21 @@ class _TeacherAssignmentFormScreenState
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
+          padding:
+          const EdgeInsets.fromLTRB(
             16,
             16,
             16,
             32,
           ),
           children: [
-            // ==================================================
+            // ======================================================
             // TITLE
-            // ==================================================
+            // ======================================================
 
             _buildTextField(
-              controller: _titleController,
+              controller:
+              _titleController,
               label: 'Judul Tugas',
               icon:
               Icons.assignment_outlined,
@@ -897,9 +1197,9 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ==================================================
+            // ======================================================
             // DESCRIPTION
-            // ==================================================
+            // ======================================================
 
             _buildTextField(
               controller:
@@ -912,23 +1212,24 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ==================================================
+            // ======================================================
             // INSTRUCTIONS
-            // ==================================================
+            // ======================================================
 
             _buildTextField(
               controller:
               _instructionsController,
               label: 'Instruksi',
-              icon: Icons.rule_outlined,
+              icon:
+              Icons.rule_outlined,
               maxLines: 4,
             ),
 
             const SizedBox(height: 16),
 
-            // ==================================================
+            // ======================================================
             // COURSE + CLASS
-            // ==================================================
+            // ======================================================
 
             _buildCourseClassSection(
               theme,
@@ -936,14 +1237,16 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ==================================================
+            // ======================================================
             // POINTS
-            // ==================================================
+            // ======================================================
 
             _buildTextField(
-              controller: _pointsController,
+              controller:
+              _pointsController,
               label: 'Nilai Maksimal',
-              icon: Icons.star_outline,
+              icon:
+              Icons.star_outline,
               keyboardType:
               TextInputType.number,
               validator: (value) {
@@ -964,23 +1267,23 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 20),
 
-            // ==================================================
+            // ======================================================
             // DEADLINE
-            // ==================================================
+            // ======================================================
 
             _buildDateSection(theme),
 
             const SizedBox(height: 24),
 
-            // ==================================================
+            // ======================================================
             // SAVE BUTTON
-            // ==================================================
+            // ======================================================
 
             SizedBox(
               height: 52,
-              child: FilledButton.icon(
-                onPressed:
-                _saving
+              child:
+              FilledButton.icon(
+                onPressed: _saving
                     ? null
                     : _saveAssignment,
                 icon: _saving

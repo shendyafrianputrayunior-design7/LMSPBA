@@ -21,6 +21,11 @@ class TeacherCourseFormScreen extends StatefulWidget {
 
 class _TeacherCourseFormScreenState
     extends State<TeacherCourseFormScreen> {
+  // ============================================================
+  // TEACHER ID STANDAR
+  // ============================================================
+  static const String _fixedTeacherId = 'teacher_001';
+
   final _formKey = GlobalKey<FormState>();
 
   final _titleController = TextEditingController();
@@ -28,6 +33,12 @@ class _TeacherCourseFormScreenState
   final _descriptionController = TextEditingController();
   final _imageController = TextEditingController();
   final _lessonsController = TextEditingController();
+
+  final FirebaseFirestore _firestore =
+      FirebaseFirestore.instance;
+
+  final FirebaseAuth _auth =
+      FirebaseAuth.instance;
 
   bool _loading = false;
   bool _loadingClasses = true;
@@ -52,7 +63,7 @@ class _TeacherCourseFormScreenState
   }
 
   void _fillExistingData() {
-    final data = widget.courseData ?? {};
+    final data = widget.courseData ?? <String, dynamic>{};
 
     _titleController.text =
         (data['title'] ?? '').toString();
@@ -69,29 +80,39 @@ class _TeacherCourseFormScreenState
     _lessonsController.text =
         (data['lessons'] ?? 0).toString();
 
+    final classId =
+    (data['classId'] ?? '').toString().trim();
+
+    final className =
+    (data['className'] ?? '').toString().trim();
+
     _selectedClassId =
-    (data['classId'] ?? '').toString().isEmpty
-        ? null
-        : (data['classId'] ?? '').toString();
+    classId.isEmpty ? null : classId;
 
     _selectedClassName =
-    (data['className'] ?? '').toString().isEmpty
-        ? null
-        : (data['className'] ?? '').toString();
+    className.isEmpty ? null : className;
   }
 
-  Future<void> _loadTeacherData() async {
-    final user = FirebaseAuth.instance.currentUser;
+  // ============================================================
+  // LOAD DATA GURU
+  // ============================================================
 
-    if (user == null) return;
+  Future<void> _loadTeacherData() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return;
+    }
 
     try {
-      final doc = await FirebaseFirestore.instance
+      final doc = await _firestore
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       final data = doc.data();
 
@@ -109,13 +130,19 @@ class _TeacherCourseFormScreenState
     }
   }
 
+  // ============================================================
+  // LOAD KELAS
+  // ============================================================
+
   Future<void> _loadClasses() async {
     try {
-      final snapshot = await FirebaseFirestore.instance
+      final snapshot = await _firestore
           .collection('classes')
           .get();
 
-      final loadedClasses = snapshot.docs.map((doc) {
+      final List<Map<String, dynamic>> loadedClasses = [];
+
+      for (final doc in snapshot.docs) {
         final data = doc.data();
 
         final className =
@@ -125,33 +152,41 @@ class _TeacherCourseFormScreenState
             doc.id)
             .toString();
 
-        return {
+        loadedClasses.add({
           'id': doc.id,
           'name': className,
-        };
-      }).toList();
+        });
+      }
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _classes = loadedClasses;
         _loadingClasses = false;
       });
 
-      // Jika sedang edit, cari nama kelas berdasarkan classId.
+      // ==========================================================
+      // JIKA EDIT, CARI NAMA KELAS BERDASARKAN ID
+      // ==========================================================
+
       if (widget.isEdit &&
           _selectedClassId != null) {
-        final selectedClass = _classes.where(
-              (item) =>
-          item['id'].toString() ==
-              _selectedClassId,
-        );
+        Map<String, dynamic>? selectedClass;
 
-        if (selectedClass.isNotEmpty) {
+        for (final item in _classes) {
+          if (item['id'].toString() ==
+              _selectedClassId) {
+            selectedClass = item;
+            break;
+          }
+        }
+
+        if (selectedClass != null && mounted) {
           setState(() {
             _selectedClassName =
-                selectedClass.first['name']
-                    .toString();
+                selectedClass!['name'].toString();
           });
         }
       }
@@ -160,7 +195,9 @@ class _TeacherCourseFormScreenState
         'Gagal mengambil data kelas: $e',
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _loadingClasses = false;
@@ -172,6 +209,10 @@ class _TeacherCourseFormScreenState
     }
   }
 
+  // ============================================================
+  // SAVE COURSE
+  // ============================================================
+
   Future<void> _saveCourse() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -182,16 +223,17 @@ class _TeacherCourseFormScreenState
       _showMessage(
         'Silakan pilih kelas terlebih dahulu.',
       );
+
       return;
     }
 
-    final user =
-        FirebaseAuth.instance.currentUser;
+    final user = _auth.currentUser;
 
     if (user == null) {
       _showMessage(
         'Akun guru tidak ditemukan.',
       );
+
       return;
     }
 
@@ -200,31 +242,57 @@ class _TeacherCourseFormScreenState
     });
 
     try {
+      // ==========================================================
+      // JUMLAH MATERI
+      // ==========================================================
+
       final lessons =
           int.tryParse(
             _lessonsController.text.trim(),
           ) ??
               0;
 
-      final selectedClass =
-      _classes.firstWhere(
-            (item) =>
-        item['id'].toString() ==
-            _selectedClassId,
-        orElse: () => {
-          'id': _selectedClassId,
-          'name': _selectedClassName ?? '',
-        },
-      );
+      // ==========================================================
+      // CARI KELAS YANG DIPILIH
+      // ==========================================================
 
-      final courseData = {
-        'teacherId': user.uid,
+      Map<String, dynamic>? selectedClass;
 
-        // Class dipilih dari dropdown
-        'classId':
-        selectedClass['id'].toString(),
-        'className':
-        selectedClass['name'].toString(),
+      for (final item in _classes) {
+        if (item['id'].toString() ==
+            _selectedClassId) {
+          selectedClass = item;
+          break;
+        }
+      }
+
+      // ==========================================================
+      // JIKA TIDAK DITEMUKAN, GUNAKAN DATA SEBELUMNYA
+      // ==========================================================
+
+      final classId =
+          selectedClass?['id']?.toString() ??
+              _selectedClassId!;
+
+      final className =
+          selectedClass?['name']?.toString() ??
+              _selectedClassName ??
+              '';
+
+      // ==========================================================
+      // DATA COURSE
+      // ==========================================================
+
+      final Map<String, dynamic> courseData = {
+        // ========================================================
+        // PENTING:
+        // SEMUA COURSE GURU MENGGUNAKAN TEACHER ID STANDAR
+        // ========================================================
+        'teacherId': _fixedTeacherId,
+
+        'classId': classId,
+
+        'className': className,
 
         'title':
         _titleController.text.trim(),
@@ -244,14 +312,23 @@ class _TeacherCourseFormScreenState
         FieldValue.serverTimestamp(),
       };
 
+      // ==========================================================
+      // UPDATE COURSE
+      // ==========================================================
+
       if (widget.isEdit) {
-        await FirebaseFirestore.instance
+        await _firestore
             .collection('courses')
             .doc(widget.courseId)
             .update(courseData);
-      } else {
-        // ID Course dibuat otomatis oleh Firestore
-        await FirebaseFirestore.instance
+      }
+
+      // ==========================================================
+      // TAMBAH COURSE
+      // ==========================================================
+
+      else {
+        await _firestore
             .collection('courses')
             .add({
           ...courseData,
@@ -260,7 +337,9 @@ class _TeacherCourseFormScreenState
         });
       }
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -274,7 +353,9 @@ class _TeacherCourseFormScreenState
 
       Navigator.pop(context, true);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       _showMessage(
         widget.isEdit
@@ -290,6 +371,10 @@ class _TeacherCourseFormScreenState
     }
   }
 
+  // ============================================================
+  // MESSAGE
+  // ============================================================
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -297,6 +382,10 @@ class _TeacherCourseFormScreenState
       ),
     );
   }
+
+  // ============================================================
+  // INPUT DECORATION
+  // ============================================================
 
   InputDecoration _inputDecoration({
     required String label,
@@ -379,15 +468,20 @@ class _TeacherCourseFormScreenState
     _descriptionController.dispose();
     _imageController.dispose();
     _lessonsController.dispose();
+
     super.dispose();
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // Pastikan value dropdown benar-benar ada
-    // di daftar kelas yang sudah dimuat.
+    // Pastikan value dropdown benar-benar
+    // tersedia di daftar kelas.
     String? dropdownClassValue;
 
     if (_selectedClassId != null &&
@@ -446,9 +540,10 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 24),
 
-              // =========================
+              // ==================================================
               // JUDUL COURSE
-              // =========================
+              // ==================================================
+
               TextFormField(
                 controller:
                 _titleController,
@@ -460,12 +555,14 @@ class _TeacherCourseFormScreenState
                   'Judul Course',
                   hint:
                   'Contoh: Pemrograman Flutter',
-                  icon:
-                  Icons.menu_book_outlined,
+                  icon: Icons
+                      .menu_book_outlined,
                 ),
                 validator: (value) {
                   if (value == null ||
-                      value.trim().isEmpty) {
+                      value
+                          .trim()
+                          .isEmpty) {
                     return 'Judul course wajib diisi';
                   }
 
@@ -475,9 +572,10 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 16),
 
-              // =========================
+              // ==================================================
               // NAMA INSTRUKTUR
-              // =========================
+              // ==================================================
+
               TextFormField(
                 controller:
                 _instructorController,
@@ -488,12 +586,14 @@ class _TeacherCourseFormScreenState
                   label:
                   'Nama Instruktur',
                   hint: 'Nama guru',
-                  icon:
-                  Icons.person_outline,
+                  icon: Icons
+                      .person_outline,
                 ),
                 validator: (value) {
                   if (value == null ||
-                      value.trim().isEmpty) {
+                      value
+                          .trim()
+                          .isEmpty) {
                     return 'Nama instruktur wajib diisi';
                   }
 
@@ -503,9 +603,10 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 16),
 
-              // =========================
+              // ==================================================
               // PILIH KELAS
-              // =========================
+              // ==================================================
+
               if (_loadingClasses)
                 Container(
                   height: 56,
@@ -518,7 +619,8 @@ class _TeacherCourseFormScreenState
                         .surfaceContainerHighest
                         .withOpacity(0.35),
                     borderRadius:
-                    BorderRadius.circular(
+                    BorderRadius
+                        .circular(
                       14,
                     ),
                   ),
@@ -540,21 +642,25 @@ class _TeacherCourseFormScreenState
                   decoration:
                   _dropdownDecoration(
                     label: 'Kelas',
-                    icon:
-                    Icons.groups_outlined,
+                    icon: Icons
+                        .groups_outlined,
                   ),
                   hint: const Text(
                     'Pilih kelas',
                   ),
-                  items: _classes.map(
-                        (classData) {
+                  items:
+                  _classes.map(
+                        (
+                        classData,
+                        ) {
                       return DropdownMenuItem<
                           String>(
-                        value:
-                        classData['id']
+                        value: classData[
+                        'id']
                             .toString(),
                         child: Text(
-                          classData['name']
+                          classData[
+                          'name']
                               .toString(),
                         ),
                       );
@@ -568,22 +674,30 @@ class _TeacherCourseFormScreenState
                       return;
                     }
 
-                    final selected =
-                    _classes
-                        .firstWhere(
-                          (item) =>
-                      item['id']
+                    Map<String,
+                        dynamic>?
+                    selected;
+
+                    for (final item
+                    in _classes) {
+                      if (item['id']
                           .toString() ==
-                          value,
-                    );
+                          value) {
+                        selected =
+                            item;
+                        break;
+                      }
+                    }
 
                     setState(() {
                       _selectedClassId =
                           value;
 
                       _selectedClassName =
-                          selected['name']
-                              .toString();
+                          selected?[
+                          'name']
+                              ?.toString() ??
+                              '';
                     });
                   },
                   validator: (value) {
@@ -598,9 +712,10 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 16),
 
-              // =========================
+              // ==================================================
               // GAMBAR
-              // =========================
+              // ==================================================
+
               TextFormField(
                 controller:
                 _imageController,
@@ -612,12 +727,14 @@ class _TeacherCourseFormScreenState
                   'Path Gambar',
                   hint:
                   'Contoh: assets/images/flutter.png',
-                  icon:
-                  Icons.image_outlined,
+                  icon: Icons
+                      .image_outlined,
                 ),
                 validator: (value) {
                   if (value == null ||
-                      value.trim().isEmpty) {
+                      value
+                          .trim()
+                          .isEmpty) {
                     return 'Path gambar wajib diisi';
                   }
 
@@ -627,9 +744,10 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 16),
 
-              // =========================
+              // ==================================================
               // JUMLAH MATERI
-              // =========================
+              // ==================================================
+
               TextFormField(
                 controller:
                 _lessonsController,
@@ -639,7 +757,8 @@ class _TeacherCourseFormScreenState
                 _inputDecoration(
                   label:
                   'Jumlah Materi',
-                  hint: 'Contoh: 10',
+                  hint:
+                  'Contoh: 10',
                   icon: Icons
                       .library_books_outlined,
                 ),
@@ -660,9 +779,10 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 16),
 
-              // =========================
+              // ==================================================
               // DESKRIPSI
-              // =========================
+              // ==================================================
+
               TextFormField(
                 controller:
                 _descriptionController,
@@ -678,7 +798,9 @@ class _TeacherCourseFormScreenState
                 ),
                 validator: (value) {
                   if (value == null ||
-                      value.trim().isEmpty) {
+                      value
+                          .trim()
+                          .isEmpty) {
                     return 'Deskripsi course wajib diisi';
                   }
 
@@ -688,14 +810,15 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 28),
 
-              // =========================
+              // ==================================================
               // SIMPAN
-              // =========================
+              // ==================================================
+
               SizedBox(
                 height: 52,
-                child: FilledButton.icon(
-                  onPressed:
-                  _loading
+                child:
+                FilledButton.icon(
+                  onPressed: _loading
                       ? null
                       : _saveCourse,
                   icon: _loading
@@ -725,12 +848,14 @@ class _TeacherCourseFormScreenState
 
               const SizedBox(height: 12),
 
-              // =========================
+              // ==================================================
               // BATAL
-              // =========================
+              // ==================================================
+
               SizedBox(
                 height: 52,
-                child: OutlinedButton(
+                child:
+                OutlinedButton(
                   onPressed: _loading
                       ? null
                       : () {
@@ -739,7 +864,9 @@ class _TeacherCourseFormScreenState
                     );
                   },
                   child:
-                  const Text('Batal'),
+                  const Text(
+                    'Batal',
+                  ),
                 ),
               ),
             ],

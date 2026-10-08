@@ -18,7 +18,18 @@ class TeacherLessonsScreen extends StatefulWidget {
 }
 
 class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore =
+      FirebaseFirestore.instance;
+
+  // ============================================================
+  // TEACHER ID
+  // ============================================================
+
+  static const String _teacherId = 'teacher_001';
+
+  // ============================================================
+  // TAMBAH MATERI
+  // ============================================================
 
   Future<void> _addLesson() async {
     await Navigator.push(
@@ -30,6 +41,10 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
       ),
     );
   }
+
+  // ============================================================
+  // EDIT MATERI
+  // ============================================================
 
   Future<void> _editLesson(
       String lessonId,
@@ -47,25 +62,34 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
     );
   }
 
+  // ============================================================
+  // HAPUS MATERI
+  // ============================================================
+
   Future<void> _deleteLesson(
       String lessonId,
       String lessonTitle,
       ) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Hapus Materi?'),
           content: Text(
-            'Materi "$lessonTitle" akan dihapus secara permanen.',
+            'Materi "$lessonTitle" akan dihapus secara permanen.\n\n'
+                'Tindakan ini tidak dapat dibatalkan.',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
               child: const Text('Batal'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
               child: const Text('Hapus'),
             ),
           ],
@@ -85,7 +109,9 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Materi berhasil dihapus.'),
+          content: Text(
+            'Materi berhasil dihapus.',
+          ),
         ),
       );
     } catch (e) {
@@ -93,11 +119,17 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Gagal menghapus materi: $e'),
+          content: Text(
+            'Gagal menghapus materi: $e',
+          ),
         ),
       );
     }
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -112,16 +144,22 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Tambah Materi'),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      body: StreamBuilder<
+          QuerySnapshot<Map<String, dynamic>>>(
         stream: _firestore
             .collection('course_lessons')
             .where(
           'courseId',
           isEqualTo: widget.course.id,
         )
+            .where(
+          'teacherId',
+          isEqualTo: _teacherId,
+        )
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState ==
+              ConnectionState.waiting) {
             return const Center(
               child: CircularProgressIndicator(),
             );
@@ -160,30 +198,47 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
             );
           }
 
-          final lessons = [...(snapshot.data?.docs ?? [])];
+          final lessons = [
+            ...(snapshot.data?.docs ?? []),
+          ];
+
+          // ======================================================
+          // SORT BERDASARKAN ORDER
+          // ======================================================
 
           lessons.sort((a, b) {
             final aOrder = a.data()['order'] is int
                 ? a.data()['order'] as int
                 : int.tryParse(
-              (a.data()['order'] ?? '0').toString(),
+              (a.data()['order'] ?? '0')
+                  .toString(),
             ) ??
                 0;
 
             final bOrder = b.data()['order'] is int
                 ? b.data()['order'] as int
                 : int.tryParse(
-              (b.data()['order'] ?? '0').toString(),
+              (b.data()['order'] ?? '0')
+                  .toString(),
             ) ??
                 0;
 
             return aOrder.compareTo(bOrder);
           });
+
+          // ======================================================
+          // EMPTY
+          // ======================================================
+
           if (lessons.isEmpty) {
             return _EmptyLessons(
               onAdd: _addLesson,
             );
           }
+
+          // ======================================================
+          // LIST MATERI
+          // ======================================================
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(
@@ -193,15 +248,21 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
               100,
             ),
             children: [
-              _CourseHeader(course: widget.course),
+              _CourseHeader(
+                course: widget.course,
+              ),
+
               const SizedBox(height: 20),
+
               Text(
                 '${lessons.length} Materi',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
+
               const SizedBox(height: 12),
+
               ...List.generate(
                 lessons.length,
                     (index) {
@@ -209,7 +270,9 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
                   final data = doc.data();
 
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.only(
+                      bottom: 12,
+                    ),
                     child: _LessonCard(
                       number: index + 1,
                       data: data,
@@ -222,7 +285,9 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
                       onDelete: () {
                         _deleteLesson(
                           doc.id,
-                          (data['title'] ?? 'Materi').toString(),
+                          (data['title'] ??
+                              'Materi')
+                              .toString(),
                         );
                       },
                     ),
@@ -236,6 +301,10 @@ class _TeacherLessonsScreenState extends State<TeacherLessonsScreen> {
     );
   }
 }
+
+// ================================================================
+// COURSE HEADER
+// ================================================================
 
 class _CourseHeader extends StatelessWidget {
   final Course course;
@@ -260,7 +329,8 @@ class _CourseHeader extends StatelessWidget {
             width: 58,
             height: 58,
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.12),
+              color: theme.colorScheme.primary
+                  .withOpacity(0.12),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(
@@ -269,10 +339,13 @@ class _CourseHeader extends StatelessWidget {
               color: theme.colorScheme.primary,
             ),
           ),
+
           const SizedBox(width: 14),
+
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
               children: [
                 Text(
                   course.title,
@@ -282,7 +355,9 @@ class _CourseHeader extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+
                 const SizedBox(height: 4),
+
                 Text(
                   course.instructor,
                   style: theme.textTheme.bodyMedium,
@@ -295,6 +370,10 @@ class _CourseHeader extends StatelessWidget {
     );
   }
 }
+
+// ================================================================
+// LESSON CARD
+// ================================================================
 
 class _LessonCard extends StatelessWidget {
   final int number;
@@ -313,16 +392,25 @@ class _LessonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final title = (data['title'] ?? 'Tanpa Judul').toString();
-    final duration = (data['duration'] ?? '').toString();
-    final content = (data['content'] ?? '').toString();
+    final title =
+    (data['title'] ?? 'Tanpa Judul').toString();
+
+    final duration =
+    (data['duration'] ?? '').toString();
+
+    final content =
+    (data['content'] ?? '').toString();
+
+    final videoUrl =
+    (data['videoUrl'] ?? '').toString();
 
     return Card(
       elevation: 0,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
             Container(
               width: 44,
@@ -336,23 +424,29 @@ class _LessonCard extends StatelessWidget {
                 '$number',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onPrimaryContainer,
+                  color:
+                  theme.colorScheme.onPrimaryContainer,
                 ),
               ),
             ),
+
             const SizedBox(width: 14),
+
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
                   Text(
                     title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style:
+                    theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+
                   if (duration.isNotEmpty) ...[
                     const SizedBox(height: 5),
                     Row(
@@ -360,32 +454,69 @@ class _LessonCard extends StatelessWidget {
                         Icon(
                           Icons.schedule_outlined,
                           size: 15,
-                          color: theme.colorScheme.onSurfaceVariant,
+                          color: theme
+                              .colorScheme
+                              .onSurfaceVariant,
                         ),
                         const SizedBox(width: 5),
                         Text(
                           '$duration menit',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                          style:
+                          theme.textTheme.bodySmall?.copyWith(
+                            color: theme
+                                .colorScheme
+                                .onSurfaceVariant,
                           ),
                         ),
                       ],
                     ),
                   ],
+
                   if (content.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(
                       content,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      style:
+                      theme.textTheme.bodySmall?.copyWith(
+                        color: theme
+                            .colorScheme
+                            .onSurfaceVariant,
                       ),
+                    ),
+                  ],
+
+                  if (videoUrl.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.video_library_outlined,
+                          size: 16,
+                          color:
+                          theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Video tersedia',
+                          style: theme
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                            color:
+                            theme.colorScheme.primary,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ],
               ),
             ),
+
             PopupMenuButton<String>(
               onSelected: (value) {
                 if (value == 'edit') {
@@ -424,6 +555,10 @@ class _LessonCard extends StatelessWidget {
   }
 }
 
+// ================================================================
+// EMPTY LESSONS
+// ================================================================
+
 class _EmptyLessons extends StatelessWidget {
   final VoidCallback onAdd;
 
@@ -439,29 +574,37 @@ class _EmptyLessons extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment:
+          MainAxisAlignment.center,
           children: [
             Icon(
               Icons.library_books_outlined,
               size: 72,
               color: theme.colorScheme.primary,
             ),
+
             const SizedBox(height: 18),
+
             Text(
               'Belum Ada Materi',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
+
             const SizedBox(height: 8),
+
             Text(
               'Tambahkan materi pertama untuk course ini.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                color:
+                theme.colorScheme.onSurfaceVariant,
               ),
             ),
+
             const SizedBox(height: 22),
+
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add),

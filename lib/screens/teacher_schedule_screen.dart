@@ -5,30 +5,55 @@ import 'package:flutter/material.dart';
 import 'teacher_schedule_form_screen.dart';
 
 class TeacherScheduleScreen extends StatefulWidget {
-  const TeacherScheduleScreen({super.key});
+  const TeacherScheduleScreen({
+    super.key,
+  });
 
   @override
   State<TeacherScheduleScreen> createState() =>
       _TeacherScheduleScreenState();
 }
 
-class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
+class _TeacherScheduleScreenState
+    extends State<TeacherScheduleScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore =
+      FirebaseFirestore.instance;
 
-  String _teacherName = 'Guru';
   String? _teacherId;
+  String _teacherName = 'Guru';
 
-  bool _loadingTeacher = true;
+  bool _loading = true;
+  bool _deleting = false;
+
+  List<Map<String, dynamic>> _schedules = [];
+
+  final List<String> _days = const [
+    'Senin',
+    'Selasa',
+    'Rabu',
+    'Kamis',
+    'Jumat',
+    'Sabtu',
+    'Minggu',
+  ];
 
   @override
   void initState() {
     super.initState();
-    _loadTeacherProfile();
+    _initialize();
   }
 
   // ============================================================
-  // GET TEACHER DOCUMENT ID
+  // INITIALIZE
+  // ============================================================
+
+  Future<void> _initialize() async {
+    await _loadTeacher();
+  }
+
+  // ============================================================
+  // GET TEACHER ID
   // ============================================================
 
   Future<String?> _getTeacherDocumentId() async {
@@ -39,6 +64,10 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
     }
 
     try {
+      // --------------------------------------------------------
+      // 1. users/{uid}.teacherId
+      // --------------------------------------------------------
+
       final userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
@@ -46,52 +75,8 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
 
       final userData = userDoc.data();
 
-      final teacherId = userData?['teacherId']?.toString().trim();
-
-      if (teacherId != null && teacherId.isNotEmpty) {
-        return teacherId;
-      }
-
-      final email = user.email?.trim();
-
-      if (email != null && email.isNotEmpty) {
-        final teacherQuery = await _firestore
-            .collection('teachers')
-            .where('email', isEqualTo: email)
-            .limit(1)
-            .get();
-
-        if (teacherQuery.docs.isNotEmpty) {
-          return teacherQuery.docs.first.id;
-        }
-      }
-    } catch (e) {
-      debugPrint('Error get teacher document ID: $e');
-    }
-
-    return null;
-  }
-
-  // ============================================================
-  // LOAD TEACHER PROFILE
-  // ============================================================
-
-  Future<void> _loadTeacherProfile() async {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _loadingTeacher = false;
-        });
-      }
-      return;
-    }
-
-    try {
-      final teacherId = await _getTeacherDocumentId();
-
-      _teacherId = teacherId;
+      final teacherId =
+      userData?['teacherId']?.toString().trim();
 
       if (teacherId != null && teacherId.isNotEmpty) {
         final teacherDoc = await _firestore
@@ -100,22 +85,107 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
             .get();
 
         if (teacherDoc.exists) {
-          final teacherData = teacherDoc.data() ?? {};
-
-          final teacherName = (
-              teacherData['name'] ??
-                  teacherData['username'] ??
-                  teacherData['displayName'] ??
-                  ''
-          ).toString().trim();
-
-          if (teacherName.isNotEmpty) {
-            _teacherName = teacherName;
-          }
+          return teacherId;
         }
       }
 
-      // Fallback ke users jika data teacher tidak ditemukan.
+      // --------------------------------------------------------
+      // 2. Cari teacher berdasarkan email
+      // --------------------------------------------------------
+
+      final email = user.email?.trim();
+
+      if (email != null && email.isNotEmpty) {
+        final teacherQuery = await _firestore
+            .collection('teachers')
+            .where(
+          'email',
+          isEqualTo: email,
+        )
+            .limit(1)
+            .get();
+
+        if (teacherQuery.docs.isNotEmpty) {
+          return teacherQuery.docs.first.id;
+        }
+      }
+    } catch (e) {
+      debugPrint(
+        'Gagal mendapatkan teacher ID: $e',
+      );
+    }
+
+    return null;
+  }
+
+  // ============================================================
+  // LOAD TEACHER
+  // ============================================================
+
+  Future<void> _loadTeacher() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+      });
+
+      _showMessage('User belum login.');
+      return;
+    }
+
+    try {
+      final teacherId =
+      await _getTeacherDocumentId();
+
+      if (!mounted) return;
+
+      if (teacherId == null ||
+          teacherId.isEmpty) {
+        setState(() {
+          _loading = false;
+        });
+
+        _showMessage(
+          'Data guru tidak ditemukan.',
+        );
+        return;
+      }
+
+      _teacherId = teacherId;
+
+      // --------------------------------------------------------
+      // Ambil nama guru
+      // --------------------------------------------------------
+
+      final teacherDoc = await _firestore
+          .collection('teachers')
+          .doc(teacherId)
+          .get();
+
+      if (teacherDoc.exists) {
+        final data =
+            teacherDoc.data() ?? {};
+
+        final name = (
+            data['name'] ??
+                data['username'] ??
+                data['displayName'] ??
+                user.displayName ??
+                'Guru'
+        ).toString().trim();
+
+        if (name.isNotEmpty) {
+          _teacherName = name;
+        }
+      }
+
+      // --------------------------------------------------------
+      // Fallback users
+      // --------------------------------------------------------
+
       if (_teacherName == 'Guru') {
         final userDoc = await _firestore
             .collection('users')
@@ -123,14 +193,15 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
             .get();
 
         if (userDoc.exists) {
-          final data = userDoc.data() ?? {};
+          final data =
+              userDoc.data() ?? {};
 
           final name = (
               data['name'] ??
                   data['username'] ??
                   data['displayName'] ??
                   user.displayName ??
-                  ''
+                  'Guru'
           ).toString().trim();
 
           if (name.isNotEmpty) {
@@ -142,205 +213,121 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
       if (_teacherName.trim().isEmpty) {
         _teacherName = 'Guru';
       }
+
+      if (!mounted) return;
+
+      await _loadSchedules();
     } catch (e) {
-      debugPrint('Error load teacher profile: $e');
+      debugPrint(
+        'Gagal load teacher: $e',
+      );
 
-      _teacherName = user.displayName ?? 'Guru';
+      if (!mounted) return;
 
-      if (_teacherName.trim().isEmpty) {
-        _teacherName = 'Guru';
-      }
-    }
-
-    if (mounted) {
       setState(() {
-        _loadingTeacher = false;
+        _loading = false;
       });
+
+      _showMessage(
+        'Gagal mengambil data guru.',
+      );
     }
   }
 
   // ============================================================
-  // SCHEDULE STREAM
+  // LOAD SCHEDULES
   // ============================================================
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _scheduleStream() {
-    final teacherId = _teacherId;
+  Future<void> _loadSchedules() async {
+    if (_teacherId == null ||
+        _teacherId!.isEmpty) {
+      if (!mounted) return;
 
-    if (teacherId == null || teacherId.isEmpty) {
-      return const Stream.empty();
-    }
+      setState(() {
+        _loading = false;
+      });
 
-    return _firestore
-        .collection('schedules')
-        .where(
-      'teacherId',
-      isEqualTo: teacherId,
-    )
-        .snapshots();
-  }
-
-  // ============================================================
-  // SORT SCHEDULE
-  // ============================================================
-
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> _sortSchedules(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-      ) {
-    const dayOrder = {
-      'Senin': 1,
-      'Selasa': 2,
-      'Rabu': 3,
-      'Kamis': 4,
-      'Jumat': 5,
-      'Sabtu': 6,
-      'Minggu': 7,
-    };
-
-    final sorted = [...docs];
-
-    sorted.sort((a, b) {
-      final dataA = a.data();
-      final dataB = b.data();
-
-      final dayA =
-          dayOrder[dataA['day']?.toString()] ?? 99;
-
-      final dayB =
-          dayOrder[dataB['day']?.toString()] ?? 99;
-
-      if (dayA != dayB) {
-        return dayA.compareTo(dayB);
-      }
-
-      final timeA =
-          dataA['startTime']?.toString() ?? '';
-
-      final timeB =
-          dataB['startTime']?.toString() ?? '';
-
-      return timeA.compareTo(timeB);
-    });
-
-    return sorted;
-  }
-
-  // ============================================================
-  // ADD
-  // ============================================================
-
-  Future<void> _addSchedule() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const TeacherScheduleFormScreen(),
-      ),
-    );
-
-    if (result == true && mounted) {
-      await _loadTeacherProfile();
-      setState(() {});
-    }
-  }
-
-  // ============================================================
-  // EDIT
-  // ============================================================
-
-  Future<void> _editSchedule(
-      QueryDocumentSnapshot<Map<String, dynamic>> doc,
-      ) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => TeacherScheduleFormScreen(
-          scheduleId: doc.id,
-          scheduleData: doc.data(),
-        ),
-      ),
-    );
-
-    if (result == true && mounted) {
-      await _loadTeacherProfile();
-      setState(() {});
-    }
-  }
-
-  // ============================================================
-  // DELETE CONFIRMATION
-  // ============================================================
-
-  Future<void> _deleteSchedule(
-      QueryDocumentSnapshot<Map<String, dynamic>> doc,
-      ) async {
-    final data = doc.data();
-
-    final courseName =
-    (data['courseName'] ?? data['subject'] ?? 'Jadwal')
-        .toString();
-
-    final day =
-    (data['day'] ?? '').toString();
-
-    final startTime =
-    (data['startTime'] ?? '').toString();
-
-    final endTime =
-    (data['endTime'] ?? '').toString();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Hapus Jadwal?'),
-          content: Text(
-            'Jadwal "$courseName"\n'
-                '$day, $startTime - $endTime\n\n'
-                'Jadwal yang dihapus tidak dapat dikembalikan.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context, false);
-              },
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context, true);
-              },
-              child: const Text('Hapus'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) {
       return;
     }
 
     try {
-      await _firestore
+      final snapshot = await _firestore
           .collection('schedules')
-          .doc(doc.id)
-          .delete();
+          .where(
+        'teacherId',
+        isEqualTo: _teacherId,
+      )
+          .get();
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Jadwal berhasil dihapus.'),
-        ),
+      final schedules =
+      snapshot.docs.map((doc) {
+        final data = doc.data();
+
+        return <String, dynamic>{
+          ...data,
+          '_id': doc.id,
+        };
+      }).toList();
+
+      // --------------------------------------------------------
+      // Urutkan berdasarkan hari kemudian jam mulai
+      // --------------------------------------------------------
+
+      schedules.sort((a, b) {
+        final dayA = _days.indexOf(
+          (a['day'] ?? '').toString(),
+        );
+
+        final dayB = _days.indexOf(
+          (b['day'] ?? '').toString(),
+        );
+
+        final normalizedDayA =
+        dayA == -1 ? 999 : dayA;
+
+        final normalizedDayB =
+        dayB == -1 ? 999 : dayB;
+
+        if (normalizedDayA !=
+            normalizedDayB) {
+          return normalizedDayA
+              .compareTo(normalizedDayB);
+        }
+
+        final startA =
+        (a['startTime'] ?? '')
+            .toString();
+
+        final startB =
+        (b['startTime'] ?? '')
+            .toString();
+
+        return startA.compareTo(startB);
+      });
+
+      setState(() {
+        _schedules = schedules;
+        _loading = false;
+      });
+
+      debugPrint(
+        'Jumlah jadwal teacher $_teacherId: ${_schedules.length}',
       );
     } catch (e) {
+      debugPrint(
+        'Gagal load schedules: $e',
+      );
+
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal menghapus jadwal: $e',
-          ),
-        ),
+      setState(() {
+        _loading = false;
+      });
+
+      _showMessage(
+        'Gagal mengambil data jadwal.',
       );
     }
   }
@@ -349,12 +336,244 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
   // REFRESH
   // ============================================================
 
-  Future<void> _refresh() async {
-    await _loadTeacherProfile();
+  Future<void> _refreshSchedules() async {
+    await _loadSchedules();
+  }
 
-    if (mounted) {
-      setState(() {});
+  // ============================================================
+  // ADD SCHEDULE
+  // ============================================================
+
+  Future<void> _addSchedule() async {
+    if (!mounted) return;
+
+    // ========================================================
+    // BUKA HALAMAN BARU
+    // BUKAN DIALOG
+    // ========================================================
+
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+        const TeacherScheduleFormScreen(),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (result == true) {
+      await _loadSchedules();
+
+      if (!mounted) return;
+
+      _showMessage(
+        'Jadwal berhasil ditambahkan.',
+      );
     }
+  }
+
+  // ============================================================
+  // EDIT SCHEDULE
+  // ============================================================
+
+  Future<void> _editSchedule(
+      Map<String, dynamic> schedule,
+      ) async {
+    if (!mounted) return;
+
+    final scheduleId =
+    schedule['_id']?.toString();
+
+    if (scheduleId == null ||
+        scheduleId.isEmpty) {
+      _showMessage(
+        'ID jadwal tidak ditemukan.',
+      );
+      return;
+    }
+
+    final data =
+    Map<String, dynamic>.from(schedule);
+
+    data.remove('_id');
+
+    // ========================================================
+    // BUKA HALAMAN BARU
+    // BUKAN DIALOG
+    // ========================================================
+
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            TeacherScheduleFormScreen(
+              scheduleId: scheduleId,
+              scheduleData: data,
+            ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (result == true) {
+      await _loadSchedules();
+
+      if (!mounted) return;
+
+      _showMessage(
+        'Jadwal berhasil diperbarui.',
+      );
+    }
+  }
+
+  // ============================================================
+  // DELETE CONFIRMATION
+  // ============================================================
+
+  Future<void> _confirmDelete(
+      Map<String, dynamic> schedule,
+      ) async {
+    if (_deleting) return;
+
+    final scheduleId =
+    schedule['_id']?.toString();
+
+    if (scheduleId == null ||
+        scheduleId.isEmpty) {
+      _showMessage(
+        'ID jadwal tidak ditemukan.',
+      );
+      return;
+    }
+
+    final subject =
+    (schedule['subject'] ?? 'Jadwal')
+        .toString();
+
+    final day =
+    (schedule['day'] ?? '')
+        .toString();
+
+    final start =
+    (schedule['startTime'] ?? '')
+        .toString();
+
+    final end =
+    (schedule['endTime'] ?? '')
+        .toString();
+
+    final confirmed =
+    await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(
+            'Hapus Jadwal?',
+          ),
+          content: Text(
+            'Jadwal "$subject"\n'
+                '$day, $start - $end\n\n'
+                'Jadwal yang dihapus tidak dapat dikembalikan.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(
+                  dialogContext,
+                ).pop(false);
+              },
+              child: const Text(
+                'Batal',
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(
+                  dialogContext,
+                ).pop(true);
+              },
+              child: const Text(
+                'Hapus',
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true ||
+        !mounted) {
+      return;
+    }
+
+    await _deleteSchedule(scheduleId);
+  }
+
+  // ============================================================
+  // DELETE SCHEDULE
+  // ============================================================
+
+  Future<void> _deleteSchedule(
+      String scheduleId,
+      ) async {
+    if (_deleting) return;
+
+    setState(() {
+      _deleting = true;
+    });
+
+    try {
+      await _firestore
+          .collection('schedules')
+          .doc(scheduleId)
+          .delete();
+
+      if (!mounted) return;
+
+      setState(() {
+        _schedules.removeWhere(
+              (schedule) =>
+          schedule['_id'] == scheduleId,
+        );
+
+        _deleting = false;
+      });
+
+      _showMessage(
+        'Jadwal berhasil dihapus.',
+      );
+    } catch (e) {
+      debugPrint(
+        'Gagal menghapus jadwal: $e',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _deleting = false;
+      });
+
+      _showMessage(
+        'Gagal menghapus jadwal: $e',
+      );
+    }
+  }
+
+  // ============================================================
+  // MESSAGE
+  // ============================================================
+
+  void _showMessage(
+      String message,
+      ) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
   }
 
   // ============================================================
@@ -367,83 +586,81 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Jadwal Mengajar'),
+        title: const Text(
+          'Jadwal Mengajar',
+        ),
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
+            onPressed:
+            _loading
+                ? null
+                : _refreshSchedules,
+            icon: const Icon(
+              Icons.refresh,
+            ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _loadingTeacher || _teacherId == null
+
+      // ========================================================
+      // TAMBAH JADWAL
+      // ========================================================
+
+      floatingActionButton:
+      _loading
+          ? null
+          : FloatingActionButton.extended(
+        onPressed:
+        _deleting
             ? null
             : _addSchedule,
-        icon: const Icon(Icons.add),
-        label: const Text('Tambah Jadwal'),
+        icon: const Icon(
+          Icons.add,
+        ),
+        label: const Text(
+          'Tambah Jadwal',
+        ),
       ),
-      body: _loadingTeacher
+
+      body: _loading
           ? const Center(
-        child: CircularProgressIndicator(),
+        child:
+        CircularProgressIndicator(),
       )
-          : _teacherId == null || _teacherId!.isEmpty
-          ? _buildTeacherNotFound(theme)
-          : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _scheduleStream(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return _buildError(
+          : RefreshIndicator(
+        onRefresh:
+        _refreshSchedules,
+        child:
+        _schedules.isEmpty
+            ? _buildEmptyState(
+          theme,
+        )
+            : ListView(
+          padding:
+          const EdgeInsets
+              .fromLTRB(
+            20,
+            20,
+            20,
+            100,
+          ),
+          children: [
+            _buildHeader(
               theme,
-              snapshot.error.toString(),
-            );
-          }
-
-          if (snapshot.connectionState ==
-              ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
-          }
-
-          final docs = snapshot.data?.docs ?? [];
-
-          if (docs.isEmpty) {
-            return _buildEmpty(theme);
-          }
-
-          final schedules = _sortSchedules(docs);
-
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                20,
-                20,
-                20,
-                100,
-              ),
-              children: [
-                _buildHeader(
-                  theme,
-                  schedules.length,
-                ),
-                const SizedBox(height: 20),
-                ...schedules.map(
-                      (doc) => Padding(
-                    padding: const EdgeInsets.only(
-                      bottom: 14,
-                    ),
-                    child: _buildScheduleCard(
-                      theme,
-                      doc,
-                    ),
-                  ),
-                ),
-              ],
             ),
-          );
-        },
+            const SizedBox(
+              height: 20,
+            ),
+            ..._schedules.map(
+                  (schedule) =>
+                  _buildScheduleCard(
+                    schedule,
+                    theme,
+                  ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -454,73 +671,88 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
 
   Widget _buildHeader(
       ThemeData theme,
-      int totalSchedule,
       ) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding:
+      const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withValues(
+        color: theme
+            .colorScheme
+            .primary
+            .withValues(
           alpha: 0.08,
         ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(
-            alpha: 0.12,
-          ),
-        ),
+        borderRadius:
+        BorderRadius.circular(18),
       ),
       child: Row(
         children: [
           Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(
+            width: 50,
+            height: 50,
+            decoration:
+            BoxDecoration(
+              color: theme
+                  .colorScheme
+                  .primary
+                  .withValues(
                 alpha: 0.12,
               ),
-              borderRadius: BorderRadius.circular(15),
+              borderRadius:
+              BorderRadius.circular(
+                14,
+              ),
             ),
             child: Icon(
-              Icons.calendar_month_outlined,
-              color: theme.colorScheme.primary,
+              Icons
+                  .calendar_month_outlined,
+              color: theme
+                  .colorScheme
+                  .primary,
               size: 28,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(
+            width: 14,
+          ),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'Jadwal Mengajar',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight:
+                    FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(
+                  height: 4,
+                ),
                 Text(
                   _teacherName,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  style: TextStyle(
+                    color:
+                    Colors.grey.shade600,
+                  ),
+                ),
+                const SizedBox(
+                  height: 6,
+                ),
+                Text(
+                  '${_schedules.length} jadwal',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: theme
+                        .colorScheme
+                        .primary,
+                    fontWeight:
+                    FontWeight.w600,
                   ),
                 ),
               ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 8,
-            ),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '$totalSchedule Jadwal',
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
             ),
           ),
         ],
@@ -533,154 +765,248 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
   // ============================================================
 
   Widget _buildScheduleCard(
+      Map<String, dynamic> schedule,
       ThemeData theme,
-      QueryDocumentSnapshot<Map<String, dynamic>> doc,
       ) {
-    final data = doc.data();
-
-    final courseName =
-    (data['courseName'] ?? data['subject'] ?? 'Course')
+    final subject =
+    (schedule['subject'] ?? '')
         .toString();
 
-    final subject =
-    (data['subject'] ?? '').toString();
+    final courseName =
+    (schedule['courseName'] ?? '')
+        .toString();
 
     final className =
-    (data['className'] ?? '').toString();
+    (schedule['className'] ?? '')
+        .toString();
 
     final day =
-    (data['day'] ?? '').toString();
+    (schedule['day'] ?? '')
+        .toString();
 
     final startTime =
-    (data['startTime'] ?? '').toString();
+    (schedule['startTime'] ?? '')
+        .toString();
 
     final endTime =
-    (data['endTime'] ?? '').toString();
+    (schedule['endTime'] ?? '')
+        .toString();
 
     final room =
-    (data['room'] ?? '').toString();
+    (schedule['room'] ?? '')
+        .toString();
 
     return Card(
+      margin:
+      const EdgeInsets.only(
+        bottom: 14,
+      ),
       elevation: 0,
-      clipBehavior: Clip.antiAlias,
+      shape:
+      RoundedRectangleBorder(
+        borderRadius:
+        BorderRadius.circular(
+          18,
+        ),
+        side: BorderSide(
+          color: theme
+              .dividerColor
+              .withValues(
+            alpha: 0.5,
+          ),
+        ),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding:
+        const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
+            // --------------------------------------------------
+            // TOP
+            // --------------------------------------------------
+
             Row(
               crossAxisAlignment:
               CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color:
-                    theme.colorScheme.primary.withValues(
-                      alpha: 0.1,
-                    ),
-                    borderRadius:
-                    BorderRadius.circular(14),
-                  ),
-                  child: Icon(
-                    Icons.menu_book_outlined,
-                    color:
-                    theme.colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment:
                     CrossAxisAlignment.start,
                     children: [
                       Text(
-                        courseName,
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(
-                          fontWeight: FontWeight.bold,
+                        subject.isEmpty
+                            ? 'Mata Pelajaran'
+                            : subject,
+                        style:
+                        const TextStyle(
+                          fontSize: 17,
+                          fontWeight:
+                          FontWeight.bold,
                         ),
                       ),
-                      if (subject.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                      if (courseName
+                          .isNotEmpty) ...[
+                        const SizedBox(
+                          height: 5,
+                        ),
                         Text(
-                          subject,
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(
-                            color: theme.colorScheme
-                                .onSurfaceVariant,
+                          courseName,
+                          style: TextStyle(
+                            color: Colors
+                                .grey
+                                .shade600,
+                            fontSize: 13,
                           ),
                         ),
                       ],
                     ],
                   ),
                 ),
+
                 PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      _editSchedule(doc);
-                    } else if (value == 'delete') {
-                      _deleteSchedule(doc);
+                  onSelected:
+                      (value) {
+                    if (value ==
+                        'edit') {
+                      _editSchedule(
+                        schedule,
+                      );
+                    } else if (value ==
+                        'delete') {
+                      _confirmDelete(
+                        schedule,
+                      );
                     }
                   },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(Icons.edit_outlined),
-                          SizedBox(width: 10),
-                          Text('Edit'),
-                        ],
+                  itemBuilder:
+                      (context) {
+                    return const [
+                      PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons
+                                  .edit_outlined,
+                            ),
+                            SizedBox(
+                              width: 10,
+                            ),
+                            Text(
+                              'Edit',
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_outline),
-                          SizedBox(width: 10),
-                          Text('Hapus'),
-                        ],
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons
+                                  .delete_outline,
+                            ),
+                            SizedBox(
+                              width: 10,
+                            ),
+                            Text(
+                              'Hapus',
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ];
+                  },
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            const Divider(),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
+
+            const SizedBox(
+              height: 14,
+            ),
+
+            // --------------------------------------------------
+            // DAY + TIME
+            // --------------------------------------------------
+
+            Container(
+              padding:
+              const EdgeInsets.all(12),
+              decoration:
+              BoxDecoration(
+                color: theme
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(
+                  alpha: 0.45,
+                ),
+                borderRadius:
+                BorderRadius.circular(
+                  12,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons
+                        .access_time_outlined,
+                    size: 20,
+                    color: theme
+                        .colorScheme
+                        .primary,
+                  ),
+                  const SizedBox(
+                    width: 10,
+                  ),
+                  Expanded(
+                    child: Text(
+                      '$day • $startTime - $endTime',
+                      style:
+                      const TextStyle(
+                        fontWeight:
+                        FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(
+              height: 12,
+            ),
+
+            // --------------------------------------------------
+            // INFO
+            // --------------------------------------------------
+
+            Row(
               children: [
-                if (day.isNotEmpty)
-                  _buildInfoChip(
-                    theme,
-                    Icons.today_outlined,
-                    day,
+                Expanded(
+                  child:
+                  _buildInfoItem(
+                    icon: Icons
+                        .groups_outlined,
+                    text:
+                    className.isEmpty
+                        ? 'Kelas'
+                        : className,
                   ),
-                if (startTime.isNotEmpty ||
-                    endTime.isNotEmpty)
-                  _buildInfoChip(
-                    theme,
-                    Icons.access_time_outlined,
-                    '$startTime - $endTime',
+                ),
+                Expanded(
+                  child:
+                  _buildInfoItem(
+                    icon: Icons
+                        .meeting_room_outlined,
+                    text:
+                    room.isEmpty
+                        ? 'Ruangan belum diisi'
+                        : room,
                   ),
-                if (className.isNotEmpty)
-                  _buildInfoChip(
-                    theme,
-                    Icons.groups_outlined,
-                    className,
-                  ),
-                if (room.isNotEmpty)
-                  _buildInfoChip(
-                    theme,
-                    Icons.meeting_room_outlined,
-                    room,
-                  ),
+                ),
               ],
             ),
           ],
@@ -690,174 +1016,125 @@ class _TeacherScheduleScreenState extends State<TeacherScheduleScreen> {
   }
 
   // ============================================================
-  // INFO CHIP
+  // INFO ITEM
   // ============================================================
 
-  Widget _buildInfoChip(
-      ThemeData theme,
-      IconData icon,
-      String text,
-      ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 11,
-        vertical: 8,
-      ),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 17,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(width: 7),
-          Text(
+  Widget _buildInfoItem({
+    required IconData icon,
+    required String text,
+  }) {
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: Colors.grey.shade600,
+        ),
+        const SizedBox(
+          width: 7,
+        ),
+        Expanded(
+          child: Text(
             text,
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w500,
+            maxLines: 2,
+            overflow:
+            TextOverflow.ellipsis,
+            style: TextStyle(
+              color:
+              Colors.grey.shade700,
+              fontSize: 13,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // EMPTY
-  // ============================================================
-
-  Widget _buildEmpty(ThemeData theme) {
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(24),
-        children: [
-          const SizedBox(height: 100),
-          Icon(
-            Icons.calendar_month_outlined,
-            size: 72,
-            color: theme.colorScheme.primary.withValues(
-              alpha: 0.35,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Belum Ada Jadwal',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Jadwal mengajar yang kamu buat akan tampil di sini.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Center(
-            child: FilledButton.icon(
-              onPressed: _addSchedule,
-              icon: const Icon(Icons.add),
-              label: const Text('Tambah Jadwal'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // TEACHER NOT FOUND
-  // ============================================================
-
-  Widget _buildTeacherNotFound(ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.person_off_outlined,
-              size: 64,
-              color: theme.colorScheme.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Data Guru Tidak Ditemukan',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'ID guru tidak ditemukan pada akun yang sedang login.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton.icon(
-              onPressed: _refresh,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Coba Lagi'),
-            ),
-          ],
         ),
-      ),
+      ],
     );
   }
 
   // ============================================================
-  // ERROR
+  // EMPTY STATE
   // ============================================================
 
-  Widget _buildError(
+  Widget _buildEmptyState(
       ThemeData theme,
-      String error,
       ) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: theme.colorScheme.error,
+    return RefreshIndicator(
+      onRefresh:
+      _refreshSchedules,
+      child: ListView(
+        physics:
+        const AlwaysScrollableScrollPhysics(),
+        padding:
+        const EdgeInsets.all(20),
+        children: [
+          const SizedBox(
+            height: 90,
+          ),
+          Container(
+            width: 80,
+            height: 80,
+            decoration:
+            BoxDecoration(
+              color: theme
+                  .colorScheme
+                  .primary
+                  .withValues(
+                alpha: 0.1,
+              ),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Gagal Memuat Jadwal',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+            child: Icon(
+              Icons
+                  .calendar_month_outlined,
+              size: 40,
+              color: theme
+                  .colorScheme
+                  .primary,
+            ),
+          ),
+          const SizedBox(
+            height: 20,
+          ),
+          const Text(
+            'Belum Ada Jadwal',
+            textAlign:
+            TextAlign.center,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight:
+              FontWeight.bold,
+            ),
+          ),
+          const SizedBox(
+            height: 8,
+          ),
+          Text(
+            'Belum ada jadwal mengajar yang tersimpan untuk akun guru ini.',
+            textAlign:
+            TextAlign.center,
+            style: TextStyle(
+              color:
+              Colors.grey.shade600,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(
+            height: 24,
+          ),
+          SizedBox(
+            height: 50,
+            child:
+            FilledButton.icon(
+              onPressed:
+              _addSchedule,
+              icon: const Icon(
+                Icons.add,
+              ),
+              label: const Text(
+                'Tambah Jadwal',
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              error,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton.icon(
-              onPressed: _refresh,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Coba Lagi'),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
