@@ -20,8 +20,12 @@ class TeacherAnnouncementFormScreen extends StatefulWidget {
 class _TeacherAnnouncementFormScreenState
     extends State<TeacherAnnouncementFormScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+
   final FirebaseFirestore _firestore =
       FirebaseFirestore.instance;
+
+  // ID guru yang digunakan di seluruh sistem teacher
+  static const String _teacherId = 'teacher_001';
 
   final _formKey = GlobalKey<FormState>();
 
@@ -29,7 +33,6 @@ class _TeacherAnnouncementFormScreenState
   final _contentController = TextEditingController();
 
   String _teacherName = 'Guru';
-  String? _teacherId;
 
   String _selectedPriority = 'Normal';
 
@@ -71,71 +74,6 @@ class _TeacherAnnouncementFormScreenState
   }
 
   // ============================================================
-  // RESOLVE TEACHER DOCUMENT ID
-  // ============================================================
-
-  Future<String?> _getTeacherDocumentId() async {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      return null;
-    }
-
-    try {
-      // ========================================================
-      // 1. USERS/{UID}.TEACHERID
-      // ========================================================
-
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      final userData = userDoc.data();
-
-      final savedTeacherId =
-      userData?['teacherId']?.toString().trim();
-
-      if (savedTeacherId != null &&
-          savedTeacherId.isNotEmpty) {
-        final teacherDoc = await _firestore
-            .collection('teachers')
-            .doc(savedTeacherId)
-            .get();
-
-        if (teacherDoc.exists) {
-          return savedTeacherId;
-        }
-      }
-
-      // ========================================================
-      // 2. FALLBACK EMAIL
-      // ========================================================
-
-      final email = user.email?.trim();
-
-      if (email != null && email.isNotEmpty) {
-        final teacherQuery = await _firestore
-            .collection('teachers')
-            .where(
-          'email',
-          isEqualTo: email,
-        )
-            .limit(1)
-            .get();
-
-        if (teacherQuery.docs.isNotEmpty) {
-          return teacherQuery.docs.first.id;
-        }
-      }
-    } catch (_) {
-      // Biarkan return null.
-    }
-
-    return null;
-  }
-
-  // ============================================================
   // LOAD INITIAL DATA
   // ============================================================
 
@@ -152,7 +90,10 @@ class _TeacherAnnouncementFormScreenState
               '')
               .toString();
 
+      // ========================================================
       // COURSE
+      // ========================================================
+
       final oldCourseId =
       (data['courseId'] ?? '').toString();
 
@@ -170,7 +111,10 @@ class _TeacherAnnouncementFormScreenState
         _selectedCourseName = oldCourseName;
       }
 
+      // ========================================================
       // CLASS
+      // ========================================================
+
       final oldClassId =
       (data['classId'] ?? '').toString();
 
@@ -185,7 +129,10 @@ class _TeacherAnnouncementFormScreenState
         _selectedClassName = oldClassName;
       }
 
+      // ========================================================
       // PRIORITY
+      // ========================================================
+
       final priority =
       (data['priority'] ?? 'Normal').toString();
 
@@ -215,7 +162,6 @@ class _TeacherAnnouncementFormScreenState
       if (mounted) {
         setState(() {
           _teacherName = 'Guru';
-          _teacherId = null;
         });
       }
 
@@ -232,7 +178,8 @@ class _TeacherAnnouncementFormScreenState
           user.displayName ?? 'Guru';
 
       if (snapshot.exists) {
-        final data = snapshot.data() ?? {};
+        final data =
+            snapshot.data() ?? {};
 
         teacherName = (
             data['name'] ??
@@ -243,13 +190,6 @@ class _TeacherAnnouncementFormScreenState
         ).toString();
       }
 
-      // ========================================================
-      // SELALU RESOLVE ID CANONICAL
-      // ========================================================
-
-      final teacherId =
-      await _getTeacherDocumentId();
-
       if (!mounted) return;
 
       setState(() {
@@ -257,20 +197,13 @@ class _TeacherAnnouncementFormScreenState
         teacherName.isEmpty
             ? 'Guru'
             : teacherName;
-
-        _teacherId = teacherId;
       });
     } catch (_) {
-      final teacherId =
-      await _getTeacherDocumentId();
-
       if (!mounted) return;
 
       setState(() {
         _teacherName =
             user.displayName ?? 'Guru';
-
-        _teacherId = teacherId;
       });
     }
   }
@@ -297,15 +230,14 @@ class _TeacherAnnouncementFormScreenState
         // ======================================================
         // COURSE
         //
-        // JANGAN DIUBAH.
-        // Courses kamu saat ini menggunakan Auth UID.
+        // Gunakan teacherId standar
         // ======================================================
 
         _firestore
             .collection('courses')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .get(),
 
@@ -320,11 +252,13 @@ class _TeacherAnnouncementFormScreenState
 
       final courseSnapshot =
       results[0]
-      as QuerySnapshot<Map<String, dynamic>>;
+      as QuerySnapshot<
+          Map<String, dynamic>>;
 
       final classSnapshot =
       results[1]
-      as QuerySnapshot<Map<String, dynamic>>;
+      as QuerySnapshot<
+          Map<String, dynamic>>;
 
       final courses =
       courseSnapshot.docs.toList();
@@ -332,7 +266,10 @@ class _TeacherAnnouncementFormScreenState
       final classes =
       classSnapshot.docs.toList();
 
+      // ========================================================
       // SORT COURSE
+      // ========================================================
+
       courses.sort((a, b) {
         final dataA = a.data();
         final dataB = b.data();
@@ -354,7 +291,10 @@ class _TeacherAnnouncementFormScreenState
         return nameA.compareTo(nameB);
       });
 
+      // ========================================================
       // SORT CLASS
+      // ========================================================
+
       classes.sort((a, b) {
         final dataA = a.data();
         final dataB = b.data();
@@ -392,16 +332,16 @@ class _TeacherAnnouncementFormScreenState
               _selectedCourseId) {
             final data = course.data();
 
-            if (mounted) {
-              setState(() {
-                _selectedCourseName = (
-                    data['title'] ??
-                        data['courseTitle'] ??
-                        data['name'] ??
-                        ''
-                ).toString();
-              });
-            }
+            if (!mounted) return;
+
+            setState(() {
+              _selectedCourseName = (
+                  data['title'] ??
+                      data['courseTitle'] ??
+                      data['name'] ??
+                      ''
+              ).toString();
+            });
 
             break;
           }
@@ -416,17 +356,18 @@ class _TeacherAnnouncementFormScreenState
         for (final classDoc in classes) {
           if (classDoc.id ==
               _selectedClassId) {
-            final data = classDoc.data();
+            final data =
+            classDoc.data();
 
-            if (mounted) {
-              setState(() {
-                _selectedClassName = (
-                    data['name'] ??
-                        data['className'] ??
-                        classDoc.id
-                ).toString();
-              });
-            }
+            if (!mounted) return;
+
+            setState(() {
+              _selectedClassName = (
+                  data['name'] ??
+                      data['className'] ??
+                      classDoc.id
+              ).toString();
+            });
 
             break;
           }
@@ -459,7 +400,8 @@ class _TeacherAnnouncementFormScreenState
       return;
     }
 
-    QueryDocumentSnapshot<Map<String, dynamic>>?
+    QueryDocumentSnapshot<
+        Map<String, dynamic>>?
     selectedCourse;
 
     for (final course in _courses) {
@@ -473,7 +415,8 @@ class _TeacherAnnouncementFormScreenState
       return;
     }
 
-    final data = selectedCourse.data();
+    final data =
+    selectedCourse.data();
 
     setState(() {
       _selectedCourseId =
@@ -502,7 +445,8 @@ class _TeacherAnnouncementFormScreenState
       return;
     }
 
-    QueryDocumentSnapshot<Map<String, dynamic>>?
+    QueryDocumentSnapshot<
+        Map<String, dynamic>>?
     selectedClass;
 
     for (final classDoc in _classes) {
@@ -516,7 +460,8 @@ class _TeacherAnnouncementFormScreenState
       return;
     }
 
-    final data = selectedClass.data();
+    final data =
+    selectedClass.data();
 
     setState(() {
       _selectedClassId =
@@ -571,31 +516,6 @@ class _TeacherAnnouncementFormScreenState
       return;
     }
 
-    // ==========================================================
-    // RESOLVE TEACHER ID
-    // ==========================================================
-
-    String? teacherId = _teacherId;
-
-    if (teacherId == null ||
-        teacherId.isEmpty) {
-      teacherId =
-      await _getTeacherDocumentId();
-    }
-
-    if (teacherId == null ||
-        teacherId.isEmpty) {
-      _showMessage(
-        'Data guru tidak ditemukan. Pastikan akun guru terhubung dengan data teachers.',
-      );
-
-      return;
-    }
-
-    if (!mounted) {
-      return;
-    }
-
     setState(() {
       _saving = true;
     });
@@ -604,14 +524,16 @@ class _TeacherAnnouncementFormScreenState
       final now =
       FieldValue.serverTimestamp();
 
-      final announcementData = {
+      final announcementData =
+      <String, dynamic>{
         // ======================================================
-        // CANONICAL TEACHER ID
+        // GURU
         // ======================================================
 
-        'teacherId': teacherId,
+        'teacherId': _teacherId,
 
-        'teacherName': _teacherName,
+        'teacherName':
+        _teacherName,
 
         // ======================================================
         // TITLE + CONTENT
@@ -661,7 +583,9 @@ class _TeacherAnnouncementFormScreenState
         await _firestore
             .collection('announcements')
             .doc(widget.announcementId)
-            .update(announcementData);
+            .update(
+          announcementData,
+        );
       }
 
       // ========================================================
@@ -677,18 +601,14 @@ class _TeacherAnnouncementFormScreenState
         });
       }
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       Navigator.pop(
         context,
         true,
       );
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
         _saving = false;
@@ -705,9 +625,7 @@ class _TeacherAnnouncementFormScreenState
   // ============================================================
 
   void _showMessage(String message) {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context)
         .showSnackBar(
@@ -773,7 +691,8 @@ class _TeacherAnnouncementFormScreenState
       );
     }
 
-    return DropdownButtonFormField<String>(
+    return DropdownButtonFormField<
+        String>(
       initialValue:
       _selectedCourseId,
       isExpanded: true,
@@ -783,7 +702,8 @@ class _TeacherAnnouncementFormScreenState
         Icons.school_outlined,
       ),
       items: _courses.map((course) {
-        final data = course.data();
+        final data =
+        course.data();
 
         final name = (
             data['title'] ??
@@ -834,7 +754,8 @@ class _TeacherAnnouncementFormScreenState
       );
     }
 
-    return DropdownButtonFormField<String>(
+    return DropdownButtonFormField<
+        String>(
       initialValue:
       _selectedClassId,
       isExpanded: true,
@@ -911,7 +832,6 @@ class _TeacherAnnouncementFormScreenState
           ),
         ),
       ),
-
       body: _loadingData
           ? const Center(
         child:
@@ -936,7 +856,8 @@ class _TeacherAnnouncementFormScreenState
                     .colorScheme
                     .primaryContainer,
                 borderRadius:
-                BorderRadius.circular(
+                BorderRadius
+                    .circular(
                   16,
                 ),
               ),
@@ -972,7 +893,8 @@ class _TeacherAnnouncementFormScreenState
                           const TextStyle(
                             fontSize: 17,
                             fontWeight:
-                            FontWeight.bold,
+                            FontWeight
+                                .bold,
                           ),
                         ),
                         const SizedBox(
@@ -1095,7 +1017,8 @@ class _TeacherAnnouncementFormScreenState
             // PRIORITY
             // ==================================================
 
-            DropdownButtonFormField<String>(
+            DropdownButtonFormField<
+                String>(
               initialValue:
               _selectedPriority,
               decoration:

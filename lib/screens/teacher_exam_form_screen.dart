@@ -23,6 +23,9 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // ID guru standar di seluruh sistem
+  static const String _teacherId = 'teacher_001';
+
   final _formKey = GlobalKey<FormState>();
 
   late final TextEditingController _titleController;
@@ -81,7 +84,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
 
     // Data lama ketika edit
     final oldCourseId = (data?['courseId'] ?? '').toString();
-
     final oldCourseName = (
         data?['courseName'] ??
             data?['courseTitle'] ??
@@ -89,7 +91,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
     ).toString();
 
     final oldClassId = (data?['classId'] ?? '').toString();
-
     final oldClassName = (data?['className'] ?? '').toString();
 
     if (oldCourseId.isNotEmpty) {
@@ -129,27 +130,22 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   // ============================================================
 
   Future<void> _loadData() async {
-    final user = _auth.currentUser;
-
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _loadingData = false;
-        });
-      }
-      return;
-    }
-
     try {
       final results = await Future.wait([
+        // ======================================================
+        // COURSE
+        // ======================================================
         _firestore
             .collection('courses')
             .where(
           'teacherId',
-          isEqualTo: user.uid,
+          isEqualTo: _teacherId,
         )
             .get(),
 
+        // ======================================================
+        // CLASS
+        // ======================================================
         _firestore
             .collection('classes')
             .get(),
@@ -160,8 +156,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
 
       final classSnapshot =
       results[1] as QuerySnapshot<Map<String, dynamic>>;
-
-      if (!mounted) return;
 
       final courses = courseSnapshot.docs.toList();
       final classes = classSnapshot.docs.toList();
@@ -214,29 +208,27 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
         return nameA.compareTo(nameB);
       });
 
-      setState(() {
-        _courses = courses;
-        _classes = classes;
-        _loadingData = false;
-      });
+      if (!mounted) return;
 
       // ========================================================
-      // SINKRONISASI COURSE SAAT EDIT
+      // VALIDASI COURSE LAMA
       // ========================================================
+
+      String? validCourseId;
+      String? validCourseName;
 
       if (_selectedCourseId != null) {
         for (final course in courses) {
           if (course.id == _selectedCourseId) {
             final data = course.data();
 
-            setState(() {
-              _selectedCourseName = (
-                  data['title'] ??
-                      data['courseTitle'] ??
-                      data['name'] ??
-                      ''
-              ).toString();
-            });
+            validCourseId = course.id;
+            validCourseName = (
+                data['title'] ??
+                    data['courseTitle'] ??
+                    data['name'] ??
+                    ''
+            ).toString();
 
             break;
           }
@@ -244,26 +236,41 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       }
 
       // ========================================================
-      // SINKRONISASI CLASS SAAT EDIT
+      // VALIDASI CLASS LAMA
       // ========================================================
+
+      String? validClassId;
+      String? validClassName;
 
       if (_selectedClassId != null) {
         for (final classDoc in classes) {
           if (classDoc.id == _selectedClassId) {
             final data = classDoc.data();
 
-            setState(() {
-              _selectedClassName = (
-                  data['name'] ??
-                      data['className'] ??
-                      classDoc.id
-              ).toString();
-            });
+            validClassId = classDoc.id;
+            validClassName = (
+                data['name'] ??
+                    data['className'] ??
+                    classDoc.id
+            ).toString();
 
             break;
           }
         }
       }
+
+      setState(() {
+        _courses = courses;
+        _classes = classes;
+
+        _selectedCourseId = validCourseId;
+        _selectedCourseName = validCourseName;
+
+        _selectedClassId = validClassId;
+        _selectedClassName = validClassName;
+
+        _loadingData = false;
+      });
     } catch (e) {
       if (!mounted) return;
 
@@ -417,39 +424,37 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       // ========================================================
 
       final data = <String, dynamic>{
-        // Guru
-        'teacherId': user.uid,
+        // GURU
+        'teacherId': _teacherId,
         'teacherName': teacherName,
 
-        // Ujian
+        // UJIAN
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
 
-        // Course
+        // COURSE
         'courseId': _selectedCourseId,
         'courseName': _selectedCourseName ?? '',
 
-        // Kelas
+        // KELAS
         'classId': _selectedClassId,
         'className': _selectedClassName ?? '',
 
-        // Jadwal
+        // JADWAL
         'date': _dateController.text.trim(),
         'startTime': _startTimeController.text.trim(),
         'endTime': _endTimeController.text.trim(),
 
-        // Ruangan
+        // RUANGAN
         'room': _roomController.text.trim(),
 
-        // Durasi
-        'duration':
-        int.tryParse(
+        // DURASI
+        'duration': int.tryParse(
           _durationController.text.trim(),
         ) ??
             60,
 
-        'updatedAt':
-        FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
       // ========================================================
@@ -511,8 +516,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   Future<void> _selectDate() async {
     DateTime initialDate = DateTime.now();
 
-    final currentText =
-    _dateController.text.trim();
+    final currentText = _dateController.text.trim();
 
     final parts = currentText.split('/');
 
@@ -688,8 +692,16 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       );
     }
 
+    // Pastikan nilai awal memang ada di daftar course.
+    final validCourseId =
+    _courses.any(
+          (course) => course.id == _selectedCourseId,
+    )
+        ? _selectedCourseId
+        : null;
+
     return DropdownButtonFormField<String>(
-      initialValue: _selectedCourseId,
+      initialValue: validCourseId,
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Course',
@@ -770,8 +782,15 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       );
     }
 
+    final validClassId =
+    _classes.any(
+          (classDoc) => classDoc.id == _selectedClassId,
+    )
+        ? _selectedClassId
+        : null;
+
     return DropdownButtonFormField<String>(
-      initialValue: _selectedClassId,
+      initialValue: validClassId,
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Kelas',
@@ -832,10 +851,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
             32,
           ),
           children: [
-            // ==================================================
-            // JUDUL
-            // ==================================================
-
             _buildField(
               controller: _titleController,
               label: 'Judul Ujian',
@@ -852,46 +867,27 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
 
             const SizedBox(height: 16),
 
-            // ==================================================
-            // DESKRIPSI
-            // ==================================================
-
             _buildField(
-              controller:
-              _descriptionController,
+              controller: _descriptionController,
               label: 'Deskripsi',
-              icon:
-              Icons.description_outlined,
+              icon: Icons.description_outlined,
               maxLines: 4,
             ),
 
             const SizedBox(height: 16),
 
-            // ==================================================
-            // COURSE
-            // ==================================================
-
             _buildCourseDropdown(),
 
             const SizedBox(height: 16),
-
-            // ==================================================
-            // KELAS
-            // ==================================================
 
             _buildClassDropdown(),
 
             const SizedBox(height: 16),
 
-            // ==================================================
-            // TANGGAL
-            // ==================================================
-
             _buildField(
               controller: _dateController,
               label: 'Tanggal',
-              icon:
-              Icons.calendar_today_outlined,
+              icon: Icons.calendar_today_outlined,
               readOnly: true,
               onTap: _selectDate,
               validator: (value) {
@@ -905,10 +901,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
             ),
 
             const SizedBox(height: 16),
-
-            // ==================================================
-            // JAM
-            // ==================================================
 
             Row(
               children: [
@@ -960,10 +952,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
 
             const SizedBox(height: 16),
 
-            // ==================================================
-            // RUANGAN
-            // ==================================================
-
             _buildField(
               controller: _roomController,
               label: 'Ruangan',
@@ -973,13 +961,8 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
 
             const SizedBox(height: 16),
 
-            // ==================================================
-            // DURASI
-            // ==================================================
-
             _buildField(
-              controller:
-              _durationController,
+              controller: _durationController,
               label: 'Durasi (menit)',
               icon: Icons.timer_outlined,
               keyboardType:
@@ -1000,10 +983,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
             ),
 
             const SizedBox(height: 28),
-
-            // ==================================================
-            // SAVE
-            // ==================================================
 
             SizedBox(
               height: 52,
