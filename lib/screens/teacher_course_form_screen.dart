@@ -24,6 +24,7 @@ class _TeacherCourseFormScreenState
   // ============================================================
   // TEACHER ID STANDAR
   // ============================================================
+
   static const String _fixedTeacherId = 'teacher_001';
 
   final _formKey = GlobalKey<FormState>();
@@ -33,6 +34,8 @@ class _TeacherCourseFormScreenState
   final _descriptionController = TextEditingController();
   final _imageController = TextEditingController();
   final _lessonsController = TextEditingController();
+
+  final _roomController = TextEditingController();
 
   final FirebaseFirestore _firestore =
       FirebaseFirestore.instance;
@@ -48,6 +51,24 @@ class _TeacherCourseFormScreenState
   String? _selectedClassId;
   String? _selectedClassName;
 
+  // ============================================================
+  // DATA JADWAL
+  // ============================================================
+
+  final List<String> _days = const [
+    'Senin',
+    'Selasa',
+    'Rabu',
+    'Kamis',
+    'Jumat',
+    'Sabtu',
+  ];
+
+  String? _selectedDay;
+
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+
   @override
   void initState() {
     super.initState();
@@ -62,8 +83,13 @@ class _TeacherCourseFormScreenState
     _loadClasses();
   }
 
+  // ============================================================
+  // FILL DATA SAAT EDIT
+  // ============================================================
+
   void _fillExistingData() {
-    final data = widget.courseData ?? <String, dynamic>{};
+    final data =
+        widget.courseData ?? <String, dynamic>{};
 
     _titleController.text =
         (data['title'] ?? '').toString();
@@ -91,6 +117,81 @@ class _TeacherCourseFormScreenState
 
     _selectedClassName =
     className.isEmpty ? null : className;
+
+    // ------------------------------------------------------------
+    // DATA JADWAL
+    // ------------------------------------------------------------
+
+    final day =
+    (data['day'] ?? '').toString().trim();
+
+    if (day.isNotEmpty && _days.contains(day)) {
+      _selectedDay = day;
+    }
+
+    _roomController.text =
+        (data['room'] ?? '').toString();
+
+    _startTime = _parseTime(
+      (data['startTime'] ?? '').toString(),
+    );
+
+    _endTime = _parseTime(
+      (data['endTime'] ?? '').toString(),
+    );
+  }
+
+  // ============================================================
+  // PARSE JAM
+  // ============================================================
+
+  TimeOfDay? _parseTime(String value) {
+    if (value.isEmpty) {
+      return null;
+    }
+
+    final parts = value.split(':');
+
+    if (parts.length != 2) {
+      return null;
+    }
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+
+    if (hour == null || minute == null) {
+      return null;
+    }
+
+    if (hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59) {
+      return null;
+    }
+
+    return TimeOfDay(
+      hour: hour,
+      minute: minute,
+    );
+  }
+
+  // ============================================================
+  // FORMAT JAM
+  // ============================================================
+
+  String _formatTime(TimeOfDay? time) {
+    if (time == null) {
+      return '';
+    }
+
+    final hour =
+    time.hour.toString().padLeft(2, '0');
+
+    final minute =
+    time.minute.toString().padLeft(2, '0');
+
+    return '$hour:$minute';
   }
 
   // ============================================================
@@ -140,7 +241,8 @@ class _TeacherCourseFormScreenState
           .collection('classes')
           .get();
 
-      final List<Map<String, dynamic>> loadedClasses = [];
+      final List<Map<String, dynamic>>
+      loadedClasses = [];
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
@@ -210,6 +312,108 @@ class _TeacherCourseFormScreenState
   }
 
   // ============================================================
+  // PILIH JAM MULAI
+  // ============================================================
+
+  Future<void> _selectStartTime() async {
+    final selected =
+    await showTimePicker(
+      context: context,
+      initialTime:
+      _startTime ??
+          const TimeOfDay(
+            hour: 7,
+            minute: 0,
+          ),
+    );
+
+    if (selected == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _startTime = selected;
+    });
+  }
+
+  // ============================================================
+  // PILIH JAM SELESAI
+  // ============================================================
+
+  Future<void> _selectEndTime() async {
+    final selected =
+    await showTimePicker(
+      context: context,
+      initialTime:
+      _endTime ??
+          const TimeOfDay(
+            hour: 8,
+            minute: 0,
+          ),
+    );
+
+    if (selected == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _endTime = selected;
+    });
+  }
+
+  // ============================================================
+  // VALIDASI JADWAL
+  // ============================================================
+
+  bool _validateSchedule() {
+    if (_selectedDay == null ||
+        _selectedDay!.isEmpty) {
+      _showMessage(
+        'Silakan pilih hari jadwal.',
+      );
+      return false;
+    }
+
+    if (_startTime == null) {
+      _showMessage(
+        'Silakan pilih jam mulai.',
+      );
+      return false;
+    }
+
+    if (_endTime == null) {
+      _showMessage(
+        'Silakan pilih jam selesai.',
+      );
+      return false;
+    }
+
+    final startMinutes =
+        _startTime!.hour * 60 +
+            _startTime!.minute;
+
+    final endMinutes =
+        _endTime!.hour * 60 +
+            _endTime!.minute;
+
+    if (endMinutes <= startMinutes) {
+      _showMessage(
+        'Jam selesai harus lebih besar dari jam mulai.',
+      );
+      return false;
+    }
+
+    if (_roomController.text.trim().isEmpty) {
+      _showMessage(
+        'Ruangan wajib diisi.',
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  // ============================================================
   // SAVE COURSE
   // ============================================================
 
@@ -223,7 +427,14 @@ class _TeacherCourseFormScreenState
       _showMessage(
         'Silakan pilih kelas terlebih dahulu.',
       );
+      return;
+    }
 
+    // ==========================================================
+    // VALIDASI JADWAL
+    // ==========================================================
+
+    if (!_validateSchedule()) {
       return;
     }
 
@@ -233,7 +444,6 @@ class _TeacherCourseFormScreenState
       _showMessage(
         'Akun guru tidak ditemukan.',
       );
-
       return;
     }
 
@@ -253,7 +463,7 @@ class _TeacherCourseFormScreenState
               0;
 
       // ==========================================================
-      // CARI KELAS YANG DIPILIH
+      // CARI KELAS
       // ==========================================================
 
       Map<String, dynamic>? selectedClass;
@@ -267,7 +477,7 @@ class _TeacherCourseFormScreenState
       }
 
       // ==========================================================
-      // JIKA TIDAK DITEMUKAN, GUNAKAN DATA SEBELUMNYA
+      // DATA KELAS
       // ==========================================================
 
       final classId =
@@ -280,18 +490,26 @@ class _TeacherCourseFormScreenState
               '';
 
       // ==========================================================
+      // DATA JADWAL
+      // ==========================================================
+
+      final startTime =
+      _formatTime(_startTime);
+
+      final endTime =
+      _formatTime(_endTime);
+
+      // ==========================================================
       // DATA COURSE
+      //
+      // Hari, jam dan ruangan disimpan juga di COURSE.
+      // Dengan begitu COURSE menjadi sumber utama jadwal.
       // ==========================================================
 
       final Map<String, dynamic> courseData = {
-        // ========================================================
-        // PENTING:
-        // SEMUA COURSE GURU MENGGUNAKAN TEACHER ID STANDAR
-        // ========================================================
         'teacherId': _fixedTeacherId,
 
         'classId': classId,
-
         'className': className,
 
         'title':
@@ -308,51 +526,87 @@ class _TeacherCourseFormScreenState
 
         'lessons': lessons,
 
+        // ========================================================
+        // DATA JADWAL
+        // ========================================================
+
+        'day': _selectedDay,
+        'startTime': startTime,
+        'endTime': endTime,
+        'room':
+        _roomController.text.trim(),
+
         'updatedAt':
         FieldValue.serverTimestamp(),
       };
 
       // ==========================================================
-      // UPDATE COURSE
-      // ==========================================================
-
-      if (widget.isEdit) {
-        await _firestore
-            .collection('courses')
-            .doc(widget.courseId)
-            .update(courseData);
-      }
-
-      // ==========================================================
       // TAMBAH COURSE
       // ==========================================================
 
-      else {
-        await _firestore
+      if (!widget.isEdit) {
+        final courseRef = await _firestore
             .collection('courses')
             .add({
           ...courseData,
           'createdAt':
           FieldValue.serverTimestamp(),
         });
+
+        // ========================================================
+        // OTOMATIS BUAT JADWAL
+        // ========================================================
+
+        await _createSchedule(
+          courseId: courseRef.id,
+          courseData: courseData,
+        );
+      }
+
+      // ==========================================================
+      // UPDATE COURSE
+      // ==========================================================
+
+      else {
+        await _firestore
+            .collection('courses')
+            .doc(widget.courseId)
+            .update(courseData);
+
+        // ========================================================
+        // OTOMATIS UPDATE JADWAL
+        // ========================================================
+
+        await _syncSchedule(
+          courseId: widget.courseId!,
+          courseData: courseData,
+        );
       }
 
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
         SnackBar(
           content: Text(
             widget.isEdit
-                ? 'Course berhasil diperbarui.'
-                : 'Course berhasil ditambahkan.',
+                ? 'Course dan jadwal berhasil diperbarui.'
+                : 'Course dan jadwal berhasil ditambahkan.',
           ),
         ),
       );
 
-      Navigator.pop(context, true);
+      Navigator.pop(
+        context,
+        true,
+      );
     } catch (e) {
+      debugPrint(
+        'Gagal menyimpan course: $e',
+      );
+
       if (!mounted) {
         return;
       }
@@ -372,11 +626,158 @@ class _TeacherCourseFormScreenState
   }
 
   // ============================================================
+  // CREATE SCHEDULE OTOMATIS
+  // ============================================================
+
+  Future<void> _createSchedule({
+    required String courseId,
+    required Map<String, dynamic> courseData,
+  }) async {
+    final scheduleData = {
+      'teacherId': _fixedTeacherId,
+
+      'courseId': courseId,
+
+      'courseName':
+      courseData['title'] ?? '',
+
+      'subject':
+      courseData['title'] ?? '',
+
+      'teacherName':
+      courseData['instructor'] ?? '',
+
+      'classId':
+      courseData['classId'] ?? '',
+
+      'className':
+      courseData['className'] ?? '',
+
+      'day':
+      courseData['day'] ?? '',
+
+      'startTime':
+      courseData['startTime'] ?? '',
+
+      'endTime':
+      courseData['endTime'] ?? '',
+
+      'room':
+      courseData['room'] ?? '',
+
+      'createdAt':
+      FieldValue.serverTimestamp(),
+
+      'updatedAt':
+      FieldValue.serverTimestamp(),
+    };
+
+    await _firestore
+        .collection('schedules')
+        .add(scheduleData);
+  }
+
+  // ============================================================
+  // SYNC SCHEDULE SAAT COURSE DIEDIT
+  // ============================================================
+
+  Future<void> _syncSchedule({
+    required String courseId,
+    required Map<String, dynamic> courseData,
+  }) async {
+    final snapshot = await _firestore
+        .collection('schedules')
+        .where(
+      'courseId',
+      isEqualTo: courseId,
+    )
+        .get();
+
+    // ==========================================================
+    // DATA YANG HARUS SAMA DENGAN COURSE
+    // ==========================================================
+
+    final scheduleData = {
+      'teacherId': _fixedTeacherId,
+
+      'courseId': courseId,
+
+      'courseName':
+      courseData['title'] ?? '',
+
+      'subject':
+      courseData['title'] ?? '',
+
+      'teacherName':
+      courseData['instructor'] ?? '',
+
+      'classId':
+      courseData['classId'] ?? '',
+
+      'className':
+      courseData['className'] ?? '',
+
+      'day':
+      courseData['day'] ?? '',
+
+      'startTime':
+      courseData['startTime'] ?? '',
+
+      'endTime':
+      courseData['endTime'] ?? '',
+
+      'room':
+      courseData['room'] ?? '',
+
+      'updatedAt':
+      FieldValue.serverTimestamp(),
+    };
+
+    // ==========================================================
+    // JIKA SUDAH ADA JADWAL
+    // UPDATE SEMUA JADWAL TERKAIT COURSE
+    // ==========================================================
+
+    if (snapshot.docs.isNotEmpty) {
+      final batch =
+      _firestore.batch();
+
+      for (final doc in snapshot.docs) {
+        batch.update(
+          doc.reference,
+          scheduleData,
+        );
+      }
+
+      await batch.commit();
+    }
+
+    // ==========================================================
+    // JIKA BELUM ADA JADWAL
+    // BUAT JADWAL BARU
+    // ==========================================================
+
+    else {
+      await _createSchedule(
+        courseId: courseId,
+        courseData: courseData,
+      );
+    }
+  }
+
+  // ============================================================
   // MESSAGE
   // ============================================================
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
+  void _showMessage(
+      String message,
+      ) {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
       SnackBar(
         content: Text(message),
       ),
@@ -392,7 +793,8 @@ class _TeacherCourseFormScreenState
     required IconData icon,
     String? hint,
   }) {
-    final theme = Theme.of(context);
+    final theme =
+    Theme.of(context);
 
     return InputDecoration(
       labelText: label,
@@ -406,14 +808,18 @@ class _TeacherCourseFormScreenState
       border: OutlineInputBorder(
         borderRadius:
         BorderRadius.circular(14),
-        borderSide: BorderSide.none,
+        borderSide:
+        BorderSide.none,
       ),
-      enabledBorder: OutlineInputBorder(
+      enabledBorder:
+      OutlineInputBorder(
         borderRadius:
         BorderRadius.circular(14),
-        borderSide: BorderSide.none,
+        borderSide:
+        BorderSide.none,
       ),
-      focusedBorder: OutlineInputBorder(
+      focusedBorder:
+      OutlineInputBorder(
         borderRadius:
         BorderRadius.circular(14),
         borderSide: BorderSide(
@@ -429,7 +835,8 @@ class _TeacherCourseFormScreenState
     required String label,
     required IconData icon,
   }) {
-    final theme = Theme.of(context);
+    final theme =
+    Theme.of(context);
 
     return InputDecoration(
       labelText: label,
@@ -442,14 +849,18 @@ class _TeacherCourseFormScreenState
       border: OutlineInputBorder(
         borderRadius:
         BorderRadius.circular(14),
-        borderSide: BorderSide.none,
+        borderSide:
+        BorderSide.none,
       ),
-      enabledBorder: OutlineInputBorder(
+      enabledBorder:
+      OutlineInputBorder(
         borderRadius:
         BorderRadius.circular(14),
-        borderSide: BorderSide.none,
+        borderSide:
+        BorderSide.none,
       ),
-      focusedBorder: OutlineInputBorder(
+      focusedBorder:
+      OutlineInputBorder(
         borderRadius:
         BorderRadius.circular(14),
         borderSide: BorderSide(
@@ -461,6 +872,25 @@ class _TeacherCourseFormScreenState
     );
   }
 
+  // ============================================================
+  // TIME FIELD DECORATION
+  // ============================================================
+
+  InputDecoration _timeDecoration({
+    required String label,
+    required IconData icon,
+  }) {
+    return _inputDecoration(
+      label: label,
+      icon: icon,
+      hint: 'Pilih waktu',
+    );
+  }
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
+
   @override
   void dispose() {
     _titleController.dispose();
@@ -468,6 +898,7 @@ class _TeacherCourseFormScreenState
     _descriptionController.dispose();
     _imageController.dispose();
     _lessonsController.dispose();
+    _roomController.dispose();
 
     super.dispose();
   }
@@ -478,10 +909,9 @@ class _TeacherCourseFormScreenState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme =
+    Theme.of(context);
 
-    // Pastikan value dropdown benar-benar
-    // tersedia di daftar kelas.
     String? dropdownClassValue;
 
     if (_selectedClassId != null &&
@@ -573,7 +1003,7 @@ class _TeacherCourseFormScreenState
               const SizedBox(height: 16),
 
               // ==================================================
-              // NAMA INSTRUKTUR
+              // INSTRUKTUR
               // ==================================================
 
               TextFormField(
@@ -586,8 +1016,8 @@ class _TeacherCourseFormScreenState
                   label:
                   'Nama Instruktur',
                   hint: 'Nama guru',
-                  icon: Icons
-                      .person_outline,
+                  icon:
+                  Icons.person_outline,
                 ),
                 validator: (value) {
                   if (value == null ||
@@ -604,7 +1034,7 @@ class _TeacherCourseFormScreenState
               const SizedBox(height: 16),
 
               // ==================================================
-              // PILIH KELAS
+              // KELAS
               // ==================================================
 
               if (_loadingClasses)
@@ -650,23 +1080,21 @@ class _TeacherCourseFormScreenState
                   ),
                   items:
                   _classes.map(
-                        (
-                        classData,
-                        ) {
+                        (classData) {
                       return DropdownMenuItem<
                           String>(
-                        value: classData[
-                        'id']
+                        value:
+                        classData['id']
                             .toString(),
                         child: Text(
-                          classData[
-                          'name']
+                          classData['name']
                               .toString(),
                         ),
                       );
                     },
                   ).toList(),
-                  onChanged: _loading
+                  onChanged:
+                  _loading
                       ? null
                       : (value) {
                     if (value ==
@@ -727,8 +1155,8 @@ class _TeacherCourseFormScreenState
                   'Path Gambar',
                   hint:
                   'Contoh: assets/images/flutter.png',
-                  icon: Icons
-                      .image_outlined,
+                  icon:
+                  Icons.image_outlined,
                 ),
                 validator: (value) {
                   if (value == null ||
@@ -811,6 +1239,207 @@ class _TeacherCourseFormScreenState
               const SizedBox(height: 28),
 
               // ==================================================
+              // PEMISAH JADWAL
+              // ==================================================
+
+              Text(
+                'Jadwal Course',
+                style: theme
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(
+                  fontWeight:
+                  FontWeight.bold,
+                ),
+              ),
+
+              const SizedBox(height: 6),
+
+              Text(
+                'Jadwal ini akan otomatis digunakan pada Jadwal Mengajar.',
+                style: theme
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(
+                  color: theme
+                      .colorScheme
+                      .onSurfaceVariant,
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ==================================================
+              // HARI
+              // ==================================================
+
+              DropdownButtonFormField<
+                  String>(
+                initialValue:
+                _selectedDay,
+                decoration:
+                _dropdownDecoration(
+                  label: 'Hari',
+                  icon: Icons
+                      .calendar_today_outlined,
+                ),
+                hint: const Text(
+                  'Pilih hari',
+                ),
+                items:
+                _days.map(
+                      (day) {
+                    return DropdownMenuItem<
+                        String>(
+                      value: day,
+                      child:
+                      Text(day),
+                    );
+                  },
+                ).toList(),
+                onChanged:
+                _loading
+                    ? null
+                    : (value) {
+                  setState(() {
+                    _selectedDay =
+                        value;
+                  });
+                },
+                validator: (value) {
+                  if (value == null ||
+                      value.isEmpty) {
+                    return 'Hari wajib dipilih';
+                  }
+
+                  return null;
+                },
+              ),
+
+              const SizedBox(height: 16),
+
+              // ==================================================
+              // JAM MULAI
+              // ==================================================
+
+              InkWell(
+                onTap:
+                _loading
+                    ? null
+                    : _selectStartTime,
+                borderRadius:
+                BorderRadius.circular(
+                  14,
+                ),
+                child:
+                InputDecorator(
+                  decoration:
+                  _timeDecoration(
+                    label:
+                    'Jam Mulai',
+                    icon: Icons
+                        .access_time_outlined,
+                  ),
+                  child: Text(
+                    _startTime == null
+                        ? 'Pilih waktu'
+                        : _formatTime(
+                      _startTime,
+                    ),
+                    style: TextStyle(
+                      color:
+                      _startTime ==
+                          null
+                          ? theme
+                          .colorScheme
+                          .onSurfaceVariant
+                          : theme
+                          .colorScheme
+                          .onSurface,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ==================================================
+              // JAM SELESAI
+              // ==================================================
+
+              InkWell(
+                onTap:
+                _loading
+                    ? null
+                    : _selectEndTime,
+                borderRadius:
+                BorderRadius.circular(
+                  14,
+                ),
+                child:
+                InputDecorator(
+                  decoration:
+                  _timeDecoration(
+                    label:
+                    'Jam Selesai',
+                    icon: Icons
+                        .access_time_filled_outlined,
+                  ),
+                  child: Text(
+                    _endTime == null
+                        ? 'Pilih waktu'
+                        : _formatTime(
+                      _endTime,
+                    ),
+                    style: TextStyle(
+                      color:
+                      _endTime ==
+                          null
+                          ? theme
+                          .colorScheme
+                          .onSurfaceVariant
+                          : theme
+                          .colorScheme
+                          .onSurface,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ==================================================
+              // RUANGAN
+              // ==================================================
+
+              TextFormField(
+                controller:
+                _roomController,
+                textInputAction:
+                TextInputAction.done,
+                decoration:
+                _inputDecoration(
+                  label: 'Ruangan',
+                  hint:
+                  'Contoh: Lab RPL',
+                  icon: Icons
+                      .meeting_room_outlined,
+                ),
+                validator: (value) {
+                  if (value == null ||
+                      value
+                          .trim()
+                          .isEmpty) {
+                    return 'Ruangan wajib diisi';
+                  }
+
+                  return null;
+                },
+              ),
+
+              const SizedBox(height: 28),
+
+              // ==================================================
               // SIMPAN
               // ==================================================
 
@@ -863,12 +1492,13 @@ class _TeacherCourseFormScreenState
                       context,
                     );
                   },
-                  child:
-                  const Text(
+                  child: const Text(
                     'Batal',
                   ),
                 ),
               ),
+
+              const SizedBox(height: 20),
             ],
           ),
         ),

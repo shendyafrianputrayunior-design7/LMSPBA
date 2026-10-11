@@ -15,6 +15,7 @@ import 'teacher_discussions_screen.dart';
 import 'teacher_students_screen.dart';
 import 'teacher_attendance_screen.dart';
 import 'teacher_schedule_form_screen.dart';
+import 'teacher_grades_screen.dart';
 
 class TeacherScreen extends StatefulWidget {
   const TeacherScreen({super.key});
@@ -320,7 +321,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
   }
 
   // ============================================================
-  // HAPUS COURSE
+  // HAPUS COURSE + SCHEDULE TERKAIT
   // ============================================================
 
   Future<void> _deleteCourse(
@@ -334,6 +335,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
           title: const Text('Hapus Course?'),
           content: Text(
             'Course "$courseTitle" akan dihapus secara permanen.\n\n'
+                'Jadwal mengajar yang terkait dengan course ini juga akan '
+                'dihapus.\n\n'
                 'Tindakan ini tidak dapat dibatalkan.',
           ),
           actions: [
@@ -357,17 +360,48 @@ class _TeacherScreenState extends State<TeacherScreen> {
     if (confirmed != true) return;
 
     try {
-      await _firestore
-          .collection('courses')
-          .doc(courseId)
-          .delete();
+      // ========================================================
+      // CARI SCHEDULE YANG TERHUBUNG DENGAN COURSE
+      // ========================================================
+
+      final scheduleSnapshot = await _firestore
+          .collection('schedules')
+          .where(
+        'courseId',
+        isEqualTo: courseId,
+      )
+          .get();
+
+      // ========================================================
+      // BATCH DELETE
+      // ========================================================
+
+      final batch = _firestore.batch();
+
+      // Hapus semua schedule yang memiliki courseId ini
+      for (final scheduleDoc in scheduleSnapshot.docs) {
+        batch.delete(scheduleDoc.reference);
+      }
+
+      // Hapus course
+      batch.delete(
+        _firestore
+            .collection('courses')
+            .doc(courseId),
+      );
+
+      // Jalankan semua penghapusan
+      await batch.commit();
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Course berhasil dihapus.',
+            scheduleSnapshot.docs.isEmpty
+                ? 'Course berhasil dihapus.'
+                : 'Course dan ${scheduleSnapshot.docs.length} '
+                'jadwal terkait berhasil dihapus.',
           ),
         ),
       );
@@ -446,6 +480,7 @@ class _TeacherScreenState extends State<TeacherScreen> {
     );
   }
 
+
   // ============================================================
   // DASHBOARD
   // ============================================================
@@ -463,23 +498,19 @@ class _TeacherScreenState extends State<TeacherScreen> {
               children: [
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Dashboard Guru',
-                        style:
-                        theme.textTheme.headlineSmall?.copyWith(
+                        style: theme.textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         'Selamat datang, $_teacherName',
-                        style:
-                        theme.textTheme.bodyMedium?.copyWith(
-                          color:
-                          theme.colorScheme.onSurfaceVariant,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -487,24 +518,27 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
                 CircleAvatar(
                   radius: 24,
-                  backgroundColor:
-                  theme.colorScheme.primaryContainer,
+                  backgroundColor: theme.colorScheme.primaryContainer,
                   child: Icon(
                     Icons.person,
-                    color:
-                    theme.colorScheme.onPrimaryContainer,
+                    color: theme.colorScheme.onPrimaryContainer,
                   ),
                 ),
               ],
             ),
+
             const SizedBox(height: 28),
+
+            // Ringkasan jumlah course
             _buildCourseSummary(),
+
             const SizedBox(height: 20),
+
+            // Menu utama Dashboard
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
-              physics:
-              const NeverScrollableScrollPhysics(),
+              physics: const NeverScrollableScrollPhysics(),
               crossAxisSpacing: 14,
               mainAxisSpacing: 14,
               childAspectRatio: 1.35,
@@ -547,19 +581,41 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
               ],
             ),
+
+            // Jarak tambahan agar Nilai Akhir tidak berdempetan
+            const SizedBox(height: 20),
+
+            // Menu Nilai Akhir
+            _DashboardCard(
+              icon: Icons.grade_outlined,
+              title: 'Nilai Akhir',
+              subtitle: 'Input dan kelola nilai siswa',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TeacherGradesScreen(),
+                  ),
+                );
+              },
+            ),
+
             const SizedBox(height: 28),
+
+            // Bagian Aksi Cepat
             Text(
               'Aksi Cepat',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
+
             const SizedBox(height: 12),
+
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
-              physics:
-              const NeverScrollableScrollPhysics(),
+              physics: const NeverScrollableScrollPhysics(),
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
               childAspectRatio: 2.7,
@@ -606,12 +662,14 @@ class _TeacherScreenState extends State<TeacherScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
+
 
   // ============================================================
   // COURSE SUMMARY

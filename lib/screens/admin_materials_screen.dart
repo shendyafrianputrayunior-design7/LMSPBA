@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../services/firestore_service.dart';
@@ -45,12 +46,21 @@ class _AdminMaterialsScreenState
         await _firestore.updateMaterial(
           id: result.id!,
           classId: result.classId,
+          className: result.className,
           teacherId: 'teacher_001',
+          teacherName: result.teacherName,
+          courseId: result.courseId,
+          courseName: result.courseName,
           subject: result.subject,
           title: result.title,
           description: result.description,
+          content: result.content,
           type: result.type,
           fileUrl: result.fileUrl,
+          attachmentUrl: result.attachmentUrl,
+          videoUrl: result.videoUrl,
+          videoFileName: result.videoFileName,
+          videoSize: result.videoSize,
         );
       }
 
@@ -61,12 +71,21 @@ class _AdminMaterialsScreenState
       else {
         await _firestore.addMaterial(
           classId: result.classId,
+          className: result.className,
           teacherId: 'teacher_001',
+          teacherName: result.teacherName,
+          courseId: result.courseId,
+          courseName: result.courseName,
           subject: result.subject,
           title: result.title,
           description: result.description,
+          content: result.content,
           type: result.type,
           fileUrl: result.fileUrl,
+          attachmentUrl: result.attachmentUrl,
+          videoUrl: result.videoUrl,
+          videoFileName: result.videoFileName,
+          videoSize: result.videoSize,
         );
       }
 
@@ -108,8 +127,7 @@ class _AdminMaterialsScreenState
         return AlertDialog(
           title: const Text('Hapus Materi'),
           content: Text(
-            'Apakah kamu yakin ingin menghapus '
-                '"$title"?',
+            'Apakah kamu yakin ingin menghapus "$title"?',
           ),
           actions: [
             TextButton(
@@ -167,14 +185,11 @@ class _AdminMaterialsScreenState
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor:
-      theme.scaffoldBackgroundColor,
-
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor:
-        theme.scaffoldBackgroundColor,
+        backgroundColor: theme.scaffoldBackgroundColor,
         title: const Text(
           'Kelola Materi',
           style: TextStyle(
@@ -182,9 +197,7 @@ class _AdminMaterialsScreenState
           ),
         ),
       ),
-
-      floatingActionButton:
-      FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           _showMaterialDialog();
         },
@@ -195,17 +208,12 @@ class _AdminMaterialsScreenState
           'Tambah Materi',
         ),
       ),
-
       body: StreamBuilder(
         stream: _firestore.getMaterials(),
         builder: (
             context,
             snapshot,
             ) {
-          // ======================================================
-          // LOADING
-          // ======================================================
-
           if (snapshot.connectionState ==
               ConnectionState.waiting) {
             return const Center(
@@ -213,20 +221,12 @@ class _AdminMaterialsScreenState
             );
           }
 
-          // ======================================================
-          // ERROR
-          // ======================================================
-
           if (snapshot.hasError) {
             return _buildErrorState(
               context,
               snapshot.error.toString(),
             );
           }
-
-          // ======================================================
-          // DATA
-          // ======================================================
 
           final materials =
               snapshot.data?.docs ?? [];
@@ -237,10 +237,6 @@ class _AdminMaterialsScreenState
               colorScheme,
             );
           }
-
-          // ======================================================
-          // LIST
-          // ======================================================
 
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(
@@ -262,7 +258,8 @@ class _AdminMaterialsScreenState
               final document =
               materials[index];
 
-              final data = document.data();
+              final data =
+              document.data();
 
               return _buildMaterialCard(
                 context,
@@ -295,8 +292,16 @@ class _AdminMaterialsScreenState
     final subject =
         material['subject']?.toString() ?? '-';
 
-    final classId =
-        material['classId']?.toString() ?? '-';
+    final className =
+    material['className']?.toString().trim().isNotEmpty ==
+        true
+        ? material['className'].toString()
+        : _classNameFromId(
+      material['classId']?.toString() ?? '',
+    );
+
+    final courseName =
+        material['courseName']?.toString() ?? '';
 
     final type =
         material['type']?.toString() ?? '-';
@@ -306,10 +311,6 @@ class _AdminMaterialsScreenState
 
     final fileUrl =
         material['fileUrl']?.toString() ?? '';
-
-    // ==========================================================
-    // ICON BERDASARKAN JENIS
-    // ==========================================================
 
     IconData typeIcon;
 
@@ -332,33 +333,6 @@ class _AdminMaterialsScreenState
       default:
         typeIcon =
             Icons.picture_as_pdf_outlined;
-    }
-
-    // ==========================================================
-    // NAMA KELAS
-    // ==========================================================
-
-    String className;
-
-    switch (classId) {
-      case 'X_RPL_1':
-        className = 'X RPL 1';
-        break;
-
-      case 'XI_RPL_1':
-        className = 'XI RPL 1';
-        break;
-
-      case 'XI_RPL_2':
-        className = 'XI RPL 2';
-        break;
-
-      case 'XII_RPL_1':
-        className = 'XII RPL 1';
-        break;
-
-      default:
-        className = classId;
     }
 
     return Container(
@@ -435,10 +409,6 @@ class _AdminMaterialsScreenState
                 ),
               ),
 
-              // ==================================================
-              // MENU
-              // ==================================================
-
               PopupMenuButton<String>(
                 onSelected: (value) {
                   if (value == 'edit') {
@@ -472,8 +442,7 @@ class _AdminMaterialsScreenState
                       child: Row(
                         children: [
                           Icon(
-                            Icons
-                                .delete_outline_rounded,
+                            Icons.delete_outline_rounded,
                           ),
                           SizedBox(width: 10),
                           Text('Hapus'),
@@ -496,10 +465,6 @@ class _AdminMaterialsScreenState
 
           const SizedBox(height: 14),
 
-          // ==========================================================
-          // TAG
-          // ==========================================================
-
           Row(
             children: [
               _buildTag(
@@ -518,9 +483,29 @@ class _AdminMaterialsScreenState
             ],
           ),
 
-          // ==========================================================
-          // DESKRIPSI
-          // ==========================================================
+          if (courseName.isNotEmpty) ...[
+            const SizedBox(height: 10),
+
+            Align(
+              alignment:
+              Alignment.centerLeft,
+              child: Text(
+                'Course: $courseName',
+                maxLines: 1,
+                overflow:
+                TextOverflow.ellipsis,
+                style: theme
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(
+                  color:
+                  colorScheme.primary,
+                  fontWeight:
+                  FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
 
           const SizedBox(height: 12),
 
@@ -536,16 +521,12 @@ class _AdminMaterialsScreenState
                   .textTheme
                   .bodySmall
                   ?.copyWith(
-                color: colorScheme
-                    .onSurfaceVariant,
+                color:
+                colorScheme.onSurfaceVariant,
                 height: 1.4,
               ),
             ),
           ),
-
-          // ==========================================================
-          // URL
-          // ==========================================================
 
           if (fileUrl.isNotEmpty &&
               fileUrl != '-') ...[
@@ -572,6 +553,29 @@ class _AdminMaterialsScreenState
         ],
       ),
     );
+  }
+
+  // ============================================================
+  // CLASS NAME
+  // ============================================================
+
+  String _classNameFromId(String classId) {
+    switch (classId) {
+      case 'X_RPL_1':
+        return 'X RPL 1';
+
+      case 'XI_RPL_1':
+        return 'XI RPL 1';
+
+      case 'XI_RPL_2':
+        return 'XI RPL 2';
+
+      case 'XII_RPL_1':
+        return 'XII RPL 1';
+
+      default:
+        return classId.isEmpty ? '-' : classId;
+    }
   }
 
   // ============================================================
@@ -608,9 +612,7 @@ class _AdminMaterialsScreenState
             color:
             colorScheme.primary,
           ),
-
           const SizedBox(width: 5),
-
           Text(
             text,
             style: theme
@@ -759,21 +761,47 @@ class _AdminMaterialsScreenState
 
 class _MaterialFormResult {
   final String? id;
+
   final String title;
   final String subject;
+
+  final String courseId;
+  final String courseName;
+
   final String classId;
+  final String className;
+
+  final String teacherName;
+
   final String type;
   final String fileUrl;
+
   final String description;
+  final String content;
+
+  final String attachmentUrl;
+
+  final String videoUrl;
+  final String videoFileName;
+  final int videoSize;
 
   const _MaterialFormResult({
     this.id,
     required this.title,
     required this.subject,
+    required this.courseId,
+    required this.courseName,
     required this.classId,
+    required this.className,
+    required this.teacherName,
     required this.type,
     required this.fileUrl,
     required this.description,
+    required this.content,
+    required this.attachmentUrl,
+    required this.videoUrl,
+    required this.videoFileName,
+    required this.videoSize,
   });
 }
 
@@ -800,6 +828,9 @@ class _MaterialFormDialogState
   final _formKey =
   GlobalKey<FormState>();
 
+  final FirebaseFirestore _db =
+      FirebaseFirestore.instance;
+
   late final TextEditingController
   _titleController;
 
@@ -810,14 +841,25 @@ class _MaterialFormDialogState
   _descriptionController;
 
   late final TextEditingController
+  _contentController;
+
+  late final TextEditingController
   _fileUrlController;
 
-  static const classIds = [
-    'X_RPL_1',
-    'XI_RPL_1',
-    'XI_RPL_2',
-    'XII_RPL_1',
-  ];
+  List<Map<String, dynamic>> _courses = [];
+
+  String? _selectedCourseId;
+
+  bool _loadingCourses = true;
+  bool _saving = false;
+
+  bool get isEdit =>
+      widget.id != null;
+
+  String _teacherName = 'Bapak Andi';
+
+  String _selectedClassId = '';
+  String _selectedClassName = '';
 
   static const materialTypes = [
     'PDF',
@@ -826,30 +868,28 @@ class _MaterialFormDialogState
     'Link',
   ];
 
-  late String selectedClass;
-  late String selectedType;
-
-  bool _saving = false;
-
-  bool get isEdit => widget.id != null;
+  String selectedType = 'PDF';
 
   @override
   void initState() {
     super.initState();
 
-    final material = widget.material;
+    final material =
+        widget.material;
 
     _titleController =
         TextEditingController(
           text:
-          material?['title']?.toString() ??
+          material?['title']
+              ?.toString() ??
               '',
         );
 
     _subjectController =
         TextEditingController(
           text:
-          material?['subject']?.toString() ??
+          material?['subject']
+              ?.toString() ??
               '',
         );
 
@@ -861,39 +901,177 @@ class _MaterialFormDialogState
               '',
         );
 
-    _fileUrlController =
+    _contentController =
         TextEditingController(
           text:
-          material?['fileUrl']?.toString() ??
+          material?['content']
+              ?.toString() ??
               '',
         );
 
-    final savedClass =
-    material?['classId']
-        ?.toString()
-        .trim();
-
-    selectedClass =
-    classIds.contains(savedClass)
-        ? savedClass!
-        : 'XI_RPL_1';
+    _fileUrlController =
+        TextEditingController(
+          text:
+          material?['fileUrl']
+              ?.toString() ??
+              '',
+        );
 
     final savedType =
     material?['type']
         ?.toString()
         .trim();
 
-    selectedType =
-    materialTypes.contains(savedType)
-        ? savedType!
-        : 'PDF';
+    if (materialTypes.contains(savedType)) {
+      selectedType = savedType!;
+    }
+
+    _teacherName =
+    material?['teacherName']
+        ?.toString()
+        .trim()
+        .isNotEmpty ==
+        true
+        ? material!['teacherName']
+        .toString()
+        : 'Bapak Andi';
+
+    _selectedCourseId =
+        material?['courseId']
+            ?.toString()
+            .trim();
+
+    _selectedClassId =
+        material?['classId']
+            ?.toString() ??
+            '';
+
+    _selectedClassName =
+        material?['className']
+            ?.toString() ??
+            '';
+
+    _loadCourses();
   }
+
+  // ============================================================
+  // LOAD COURSES
+  // ============================================================
+
+  Future<void> _loadCourses() async {
+    try {
+      final snapshot = await _db
+          .collection('courses')
+          .orderBy('title')
+          .get();
+
+      final loaded = snapshot.docs.map((doc) {
+        final data = doc.data();
+
+        return {
+          'id': doc.id,
+          ...data,
+        };
+      }).toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        _courses = loaded;
+        _loadingCourses = false;
+      });
+
+      if (_selectedCourseId != null) {
+        final exists = _courses.any(
+              (course) =>
+          course['id'] ==
+              _selectedCourseId,
+        );
+
+        if (!exists) {
+          setState(() {
+            _selectedCourseId = null;
+          });
+        } else {
+          _applyCourse(
+            _courses.firstWhere(
+                  (course) =>
+              course['id'] ==
+                  _selectedCourseId,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingCourses = false;
+      });
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        SnackBar(
+          content: Text(
+            'Gagal memuat course: $e',
+          ),
+        ),
+      );
+    }
+  }
+
+  // ============================================================
+  // APPLY COURSE
+  // ============================================================
+
+  void _applyCourse(
+      Map<String, dynamic> course,
+      ) {
+    final courseId =
+        course['id']?.toString() ?? '';
+
+    final courseName =
+        course['title']?.toString() ??
+            course['name']?.toString() ??
+            '';
+
+    final classId =
+        course['classId']?.toString() ??
+            '';
+
+    final className =
+        course['className']?.toString() ??
+            '';
+
+    setState(() {
+      _selectedCourseId =
+          courseId;
+
+      _selectedClassId =
+          classId;
+
+      _selectedClassName =
+          className;
+
+      if (_subjectController.text
+          .trim()
+          .isEmpty) {
+        _subjectController.text =
+            courseName;
+      }
+    });
+  }
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
 
   @override
   void dispose() {
     _titleController.dispose();
     _subjectController.dispose();
     _descriptionController.dispose();
+    _contentController.dispose();
     _fileUrlController.dispose();
 
     super.dispose();
@@ -910,28 +1088,109 @@ class _MaterialFormDialogState
       return;
     }
 
+    if (_selectedCourseId == null ||
+        _selectedCourseId!.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Course wajib dipilih',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (_selectedClassId.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Course belum memiliki classId',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _saving = true;
     });
 
-    final result = _MaterialFormResult(
-      id: widget.id,
-      title:
-      _titleController.text.trim(),
-      subject:
-      _subjectController.text.trim(),
-      classId: selectedClass,
-      type: selectedType,
-      fileUrl:
-      _fileUrlController.text.trim(),
-      description:
-      _descriptionController.text.trim(),
+    final selectedCourse =
+    _courses.firstWhere(
+          (course) =>
+      course['id'] ==
+          _selectedCourseId,
+      orElse: () => {},
     );
 
-    // Dialog hanya mengembalikan data.
-    // Firestore diproses oleh parent setelah dialog tertutup.
-    Navigator.of(context).pop(result);
+    final courseName =
+        selectedCourse['title']
+            ?.toString() ??
+            selectedCourse['name']
+                ?.toString() ??
+            '';
+
+    final result =
+    _MaterialFormResult(
+      id: widget.id,
+
+      title:
+      _titleController.text.trim(),
+
+      subject:
+      _subjectController.text.trim(),
+
+      courseId:
+      _selectedCourseId!,
+
+      courseName:
+      courseName,
+
+      classId:
+      _selectedClassId,
+
+      className:
+      _selectedClassName,
+
+      teacherName:
+      _teacherName,
+
+      type:
+      selectedType,
+
+      fileUrl:
+      _fileUrlController.text.trim(),
+
+      description:
+      _descriptionController.text.trim(),
+
+      content:
+      _contentController.text.trim(),
+
+      attachmentUrl:
+      _fileUrlController.text.trim(),
+
+      videoUrl:
+      selectedType == 'Video'
+          ? _fileUrlController.text.trim()
+          : '',
+
+      videoFileName:
+      '',
+
+      videoSize:
+      0,
+    );
+
+    Navigator.of(context)
+        .pop(result);
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -941,7 +1200,6 @@ class _MaterialFormDialogState
             ? 'Edit Materi'
             : 'Tambah Materi',
       ),
-
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -1008,12 +1266,104 @@ class _MaterialFormDialogState
               const SizedBox(height: 14),
 
               // ==================================================
+              // COURSE
+              // ==================================================
+
+              if (_loadingCourses)
+                const Padding(
+                  padding:
+                  EdgeInsets.symmetric(
+                    vertical: 12,
+                  ),
+                  child:
+                  CircularProgressIndicator(),
+                )
+              else
+                DropdownButtonFormField<String>(
+                  initialValue:
+                  _courses.any(
+                        (course) =>
+                    course['id'] ==
+                        _selectedCourseId,
+                  )
+                      ? _selectedCourseId
+                      : null,
+                  decoration:
+                  const InputDecoration(
+                    labelText:
+                    'Course',
+                    prefixIcon: Icon(
+                      Icons.school_outlined,
+                    ),
+                  ),
+                  items: _courses.map(
+                        (course) {
+                      final id =
+                      course['id']
+                          .toString();
+
+                      final name =
+                          course['title']
+                              ?.toString() ??
+                              course['name']
+                                  ?.toString() ??
+                              id;
+
+                      return DropdownMenuItem<
+                          String>(
+                        value: id,
+                        child: Text(
+                          name,
+                          overflow:
+                          TextOverflow.ellipsis,
+                        ),
+                      );
+                    },
+                  ).toList(),
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                    if (value ==
+                        null) {
+                      return;
+                    }
+
+                    final course =
+                    _courses.firstWhere(
+                          (item) =>
+                      item['id'] ==
+                          value,
+                    );
+
+                    _applyCourse(
+                      course,
+                    );
+                  },
+                  validator: (value) {
+                    if (value == null ||
+                        value.isEmpty) {
+                      return 'Course wajib dipilih';
+                    }
+
+                    return null;
+                  },
+                ),
+
+              const SizedBox(height: 14),
+
+              // ==================================================
               // KELAS
               // ==================================================
 
-              DropdownButtonFormField<String>(
-                initialValue:
-                selectedClass,
+              TextFormField(
+                readOnly: true,
+                controller:
+                TextEditingController(
+                  text:
+                  _selectedClassName.isNotEmpty
+                      ? _selectedClassName
+                      : _selectedClassId,
+                ),
                 decoration:
                 const InputDecoration(
                   labelText: 'Kelas',
@@ -1021,44 +1371,6 @@ class _MaterialFormDialogState
                     Icons.class_outlined,
                   ),
                 ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'X_RPL_1',
-                    child: Text(
-                      'X RPL 1',
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'XI_RPL_1',
-                    child: Text(
-                      'XI RPL 1',
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'XI_RPL_2',
-                    child: Text(
-                      'XI RPL 2',
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'XII_RPL_1',
-                    child: Text(
-                      'XII RPL 1',
-                    ),
-                  ),
-                ],
-                onChanged: _saving
-                    ? null
-                    : (value) {
-                  if (value == null) {
-                    return;
-                  }
-
-                  setState(() {
-                    selectedClass =
-                        value;
-                  });
-                },
               ),
 
               const SizedBox(height: 14),
@@ -1081,27 +1393,30 @@ class _MaterialFormDialogState
                 items: const [
                   DropdownMenuItem(
                     value: 'PDF',
-                    child: Text('PDF'),
+                    child:
+                    Text('PDF'),
                   ),
                   DropdownMenuItem(
                     value: 'Video',
-                    child: Text('Video'),
+                    child:
+                    Text('Video'),
                   ),
                   DropdownMenuItem(
                     value: 'Dokumen',
-                    child: Text(
-                      'Dokumen',
-                    ),
+                    child:
+                    Text('Dokumen'),
                   ),
                   DropdownMenuItem(
                     value: 'Link',
-                    child: Text('Link'),
+                    child:
+                    Text('Link'),
                   ),
                 ],
                 onChanged: _saving
                     ? null
                     : (value) {
-                  if (value == null) {
+                  if (value ==
+                      null) {
                     return;
                   }
 
@@ -1158,30 +1473,46 @@ class _MaterialFormDialogState
                   true,
                 ),
               ),
+
+              const SizedBox(height: 14),
+
+              // ==================================================
+              // CONTENT
+              // ==================================================
+
+              TextFormField(
+                controller:
+                _contentController,
+                maxLines: 2,
+                decoration:
+                const InputDecoration(
+                  labelText:
+                  'Content',
+                  hintText:
+                  'Isi/topik materi',
+                  prefixIcon: Icon(
+                    Icons.notes_rounded,
+                  ),
+                  alignLabelWithHint:
+                  true,
+                ),
+              ),
             ],
           ),
         ),
       ),
-
       actions: [
-        // ========================================================
-        // BATAL
-        // ========================================================
-
         TextButton(
           onPressed: _saving
               ? null
               : () {
-            Navigator.of(context)
-                .pop();
+            Navigator.of(
+              context,
+            ).pop();
           },
           child:
           const Text('Batal'),
         ),
-
-        // ========================================================
-        // SIMPAN
-        // ========================================================
 
         FilledButton(
           onPressed:

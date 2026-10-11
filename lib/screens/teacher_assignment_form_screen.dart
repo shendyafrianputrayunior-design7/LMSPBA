@@ -1,6 +1,11 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import '../services/cloudinary_service.dart';
 
 class TeacherAssignmentFormScreen extends StatefulWidget {
   final String? assignmentId;
@@ -36,6 +41,7 @@ class _TeacherAssignmentFormScreenState
   bool _saving = false;
   bool _loadingCourses = true;
   bool _loadingClasses = true;
+  bool _uploadingFile = false;
 
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _courses = [];
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _classes = [];
@@ -45,6 +51,22 @@ class _TeacherAssignmentFormScreenState
 
   String? _selectedClassId;
   String? _selectedClassName;
+
+  // ============================================================
+  // FILE TUGAS
+  // ============================================================
+
+  File? _selectedFile;
+
+  String _selectedFileName = '';
+  int _selectedFileSize = 0;
+  String _selectedFileType = '';
+
+  // File lama ketika edit
+  String _existingFileUrl = '';
+  String _existingFileName = '';
+  int _existingFileSize = 0;
+  String _existingFileType = '';
 
   @override
   void initState() {
@@ -76,7 +98,8 @@ class _TeacherAssignmentFormScreenState
       _dueDate = existingDueDate;
     }
 
-    final existingCourseId = (data?['courseId'] ?? '').toString().trim();
+    final existingCourseId =
+    (data?['courseId'] ?? '').toString().trim();
 
     if (existingCourseId.isNotEmpty) {
       _selectedCourseId = existingCourseId;
@@ -91,17 +114,42 @@ class _TeacherAssignmentFormScreenState
       _selectedCourseTitle = existingCourseTitle;
     }
 
-    final existingClassId = (data?['classId'] ?? '').toString().trim();
+    final existingClassId =
+    (data?['classId'] ?? '').toString().trim();
 
     if (existingClassId.isNotEmpty) {
       _selectedClassId = existingClassId;
     }
 
-    final existingClassName = (data?['className'] ?? '').toString().trim();
+    final existingClassName =
+    (data?['className'] ?? '').toString().trim();
 
     if (existingClassName.isNotEmpty) {
       _selectedClassName = existingClassName;
     }
+
+    // ==========================================================
+    // FILE LAMA
+    // ==========================================================
+
+    _existingFileUrl =
+        (data?['attachmentUrl'] ?? data?['fileUrl'] ?? '')
+            .toString()
+            .trim();
+
+    _existingFileName =
+        (data?['fileName'] ?? data?['attachmentName'] ?? '')
+            .toString()
+            .trim();
+
+    _existingFileSize =
+        int.tryParse(
+          (data?['fileSize'] ?? 0).toString(),
+        ) ??
+            0;
+
+    _existingFileType =
+        (data?['fileType'] ?? '').toString().trim();
 
     _loadCourses();
     _loadClasses();
@@ -129,10 +177,6 @@ class _TeacherAssignmentFormScreenState
     }
 
     try {
-      // ----------------------------------------------------------
-      // 1. Cek users/{uid}.teacherId
-      // ----------------------------------------------------------
-
       final userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
@@ -154,10 +198,6 @@ class _TeacherAssignmentFormScreenState
           return teacherIdFromUser;
         }
       }
-
-      // ----------------------------------------------------------
-      // 2. Fallback berdasarkan email
-      // ----------------------------------------------------------
 
       final email = user.email?.trim();
 
@@ -202,13 +242,10 @@ class _TeacherAssignmentFormScreenState
     }
 
     try {
-      final teacherDocumentId = await _getTeacherDocumentId();
+      final teacherDocumentId =
+      await _getTeacherDocumentId();
 
       QuerySnapshot<Map<String, dynamic>> snapshot;
-
-      // ----------------------------------------------------------
-      // Gunakan teacher document ID sebagai data utama.
-      // ----------------------------------------------------------
 
       if (teacherDocumentId != null &&
           teacherDocumentId.isNotEmpty) {
@@ -220,11 +257,6 @@ class _TeacherAssignmentFormScreenState
         )
             .get();
       } else {
-        // --------------------------------------------------------
-        // Fallback untuk data lama yang masih menggunakan UID.
-        // Tidak mengubah data lama.
-        // --------------------------------------------------------
-
         snapshot = await _firestore
             .collection('courses')
             .where(
@@ -238,22 +270,15 @@ class _TeacherAssignmentFormScreenState
         return;
       }
 
-      // ----------------------------------------------------------
-      // Hapus kemungkinan duplikasi berdasarkan document ID.
-      // ----------------------------------------------------------
-
-      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>>
-      uniqueCourses = {};
+      final Map<
+          String,
+          QueryDocumentSnapshot<Map<String, dynamic>>> uniqueCourses = {};
 
       for (final course in snapshot.docs) {
         uniqueCourses[course.id] = course;
       }
 
       final courses = uniqueCourses.values.toList();
-
-      // ----------------------------------------------------------
-      // Urutkan berdasarkan nama course.
-      // ----------------------------------------------------------
 
       courses.sort((a, b) {
         final titleA =
@@ -265,15 +290,12 @@ class _TeacherAssignmentFormScreenState
         return titleA.compareTo(titleB);
       });
 
-      // ----------------------------------------------------------
-      // Sinkronisasi course ketika edit.
-      // ----------------------------------------------------------
-
       String? validSelectedCourseId = _selectedCourseId;
       String? validSelectedCourseTitle = _selectedCourseTitle;
 
       if (validSelectedCourseId != null) {
-        QueryDocumentSnapshot<Map<String, dynamic>>? selectedCourse;
+        QueryDocumentSnapshot<
+            Map<String, dynamic>>? selectedCourse;
 
         for (final course in courses) {
           if (course.id == validSelectedCourseId) {
@@ -296,13 +318,6 @@ class _TeacherAssignmentFormScreenState
             validSelectedCourseTitle = 'Course tanpa nama';
           }
         } else {
-          // ------------------------------------------------------
-          // Course lama tidak ditemukan.
-          //
-          // Jangan memasukkan ID tersebut ke DropdownButton,
-          // karena akan menyebabkan assertion Flutter.
-          // ------------------------------------------------------
-
           validSelectedCourseId = null;
           validSelectedCourseTitle = null;
         }
@@ -346,12 +361,9 @@ class _TeacherAssignmentFormScreenState
         return;
       }
 
-      // ----------------------------------------------------------
-      // Hilangkan duplikasi berdasarkan document ID.
-      // ----------------------------------------------------------
-
-      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>>
-      uniqueClasses = {};
+      final Map<
+          String,
+          QueryDocumentSnapshot<Map<String, dynamic>>> uniqueClasses = {};
 
       for (final classDoc in snapshot.docs) {
         uniqueClasses[classDoc.id] = classDoc;
@@ -366,15 +378,12 @@ class _TeacherAssignmentFormScreenState
         return nameA.compareTo(nameB);
       });
 
-      // ----------------------------------------------------------
-      // Sinkronisasi kelas ketika edit.
-      // ----------------------------------------------------------
-
       String? validSelectedClassId = _selectedClassId;
       String? validSelectedClassName = _selectedClassName;
 
       if (validSelectedClassId != null) {
-        QueryDocumentSnapshot<Map<String, dynamic>>? selectedClass;
+        QueryDocumentSnapshot<
+            Map<String, dynamic>>? selectedClass;
 
         for (final classDoc in classes) {
           if (classDoc.id == validSelectedClassId) {
@@ -431,6 +440,13 @@ class _TeacherAssignmentFormScreenState
       return name;
     }
 
+    final className =
+    (data['className'] ?? '').toString().trim();
+
+    if (className.isNotEmpty) {
+      return className;
+    }
+
     return classDoc.id;
   }
 
@@ -443,8 +459,7 @@ class _TeacherAssignmentFormScreenState
       ) {
     final data = course.data();
 
-    final title =
-    (data['title'] ?? '').toString().trim();
+    final title = (data['title'] ?? '').toString().trim();
 
     setState(() {
       _selectedCourseId = course.id;
@@ -467,6 +482,198 @@ class _TeacherAssignmentFormScreenState
   }
 
   // ============================================================
+  // PICK ASSIGNMENT FILE
+  // ============================================================
+
+  Future<void> _pickAssignmentFile() async {
+    if (_saving || _uploadingFile) {
+      return;
+    }
+
+    try {
+      // ========================================================
+      // SESUAI DENGAN VERSI FILE_PICKER YANG KAMU PAKAI
+      //
+      // Tidak menggunakan:
+      // - FilePicker.platform
+      // - FilePickerResult
+      // - withData
+      // - result.files.single
+      //
+      // pickFiles() mengembalikan List<PlatformFile>
+      // ========================================================
+
+      final List<PlatformFile> result =
+          await FilePicker.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: [
+              'pdf',
+              'doc',
+              'docx',
+              'ppt',
+              'pptx',
+              'xls',
+              'xlsx',
+              'zip',
+              'rar',
+              'jpg',
+              'jpeg',
+              'png',
+            ],
+          ) ??
+              <PlatformFile>[];
+
+      if (result.isEmpty) {
+        return;
+      }
+
+      final PlatformFile picked = result.first;
+
+      final String? pickedPath = picked.path;
+
+      if (pickedPath == null || pickedPath.trim().isEmpty) {
+        _showMessage(
+          'File tidak dapat dibaca dari perangkat.',
+        );
+        return;
+      }
+
+      final File file = File(pickedPath);
+
+      if (!await file.exists()) {
+        _showMessage(
+          'File tidak ditemukan.',
+        );
+        return;
+      }
+
+      final String fileName = picked.name.trim();
+
+      final String extension = fileName.contains('.')
+          ? fileName.split('.').last.toUpperCase()
+          : '';
+
+      final int fileSize = await file.length();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _selectedFile = file;
+        _selectedFileName = fileName;
+        _selectedFileSize = fileSize;
+        _selectedFileType = extension;
+      });
+    } catch (e) {
+      _showMessage(
+        'Gagal memilih file:\n$e',
+      );
+    }
+  }
+
+  // ============================================================
+  // REMOVE SELECTED FILE
+  // ============================================================
+
+  void _removeSelectedFile() {
+    if (_saving || _uploadingFile) {
+      return;
+    }
+
+    setState(() {
+      _selectedFile = null;
+      _selectedFileName = '';
+      _selectedFileSize = 0;
+      _selectedFileType = '';
+    });
+  }
+
+  // ============================================================
+  // REMOVE EXISTING FILE
+  // ============================================================
+
+  void _removeExistingFile() {
+    if (_saving || _uploadingFile) {
+      return;
+    }
+
+    setState(() {
+      _existingFileUrl = '';
+      _existingFileName = '';
+      _existingFileSize = 0;
+      _existingFileType = '';
+    });
+  }
+
+  // ============================================================
+  // FORMAT FILE SIZE
+  // ============================================================
+
+  String _formatFileSize(int bytes) {
+    if (bytes <= 0) {
+      return '-';
+    }
+
+    if (bytes < 1024) {
+      return '$bytes B';
+    }
+
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  // ============================================================
+  // UPLOAD FILE
+  // ============================================================
+
+  Future<String?> _uploadAssignmentFile() async {
+    if (_selectedFile == null) {
+      return null;
+    }
+
+    if (mounted) {
+      setState(() {
+        _uploadingFile = true;
+      });
+    }
+
+    try {
+      final url =
+      await CloudinaryService.uploadAssignmentFile(
+        _selectedFile!,
+      );
+
+      if (url == null || url.trim().isEmpty) {
+        throw Exception(
+          'Cloudinary tidak mengembalikan URL file.',
+        );
+      }
+
+      return url;
+    } catch (e) {
+      _showMessage(
+        'Gagal mengunggah dokumen:\n$e',
+      );
+
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _uploadingFile = false;
+        });
+      }
+    }
+  }
+
+  // ============================================================
   // FORMAT DATE
   // ============================================================
 
@@ -481,6 +688,10 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   Future<void> _saveAssignment() async {
+    if (_saving || _uploadingFile) {
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -540,72 +751,88 @@ class _TeacherAssignmentFormScreenState
           'Guru')
           .toString();
 
-      // ----------------------------------------------------------
-      // Ambil teacher document ID.
-      // ----------------------------------------------------------
-
       final teacherDocumentId =
       await _getTeacherDocumentId();
 
-      // ----------------------------------------------------------
-      // Data assignment
-      // ----------------------------------------------------------
+      // ========================================================
+      // FILE
+      // ========================================================
+
+      String fileUrl = _existingFileUrl;
+      String fileName = _existingFileName;
+      int fileSize = _existingFileSize;
+      String fileType = _existingFileType;
+
+      // File baru dipilih
+      if (_selectedFile != null) {
+        final uploadedUrl =
+        await _uploadAssignmentFile();
+
+        if (uploadedUrl == null ||
+            uploadedUrl.trim().isEmpty) {
+          if (mounted) {
+            setState(() {
+              _saving = false;
+            });
+          }
+
+          return;
+        }
+
+        fileUrl = uploadedUrl;
+        fileName = _selectedFileName;
+        fileSize = _selectedFileSize;
+        fileType = _selectedFileType;
+      }
+
+      // ========================================================
+      // DATA ASSIGNMENT
+      // ========================================================
 
       final data = <String, dynamic>{
         'title': _titleController.text.trim(),
-
-        'description':
-        _descriptionController.text.trim(),
-
-        'instructions':
-        _instructionsController.text.trim(),
-
-        // --------------------------------------------------------
-        // COURSE
-        // --------------------------------------------------------
+        'description': _descriptionController.text.trim(),
+        'instructions': _instructionsController.text.trim(),
 
         'courseId': _selectedCourseId,
         'courseTitle': _selectedCourseTitle,
 
-        // --------------------------------------------------------
-        // CLASS
-        // --------------------------------------------------------
-
         'classId': _selectedClassId,
         'className': _selectedClassName,
 
-        // --------------------------------------------------------
-        // OTHER DATA
-        // --------------------------------------------------------
-
         'points': points,
 
-        // Gunakan teacher document ID jika tersedia.
-        // Jika tidak ditemukan, pertahankan UID sebagai
-        // fallback agar proses tidak gagal.
-        'teacherId':
-        teacherDocumentId ?? user.uid,
+        // Canonical teacher ID.
+        'teacherId': teacherDocumentId ?? 'teacher_001',
 
         'teacherName': teacherName,
 
-        'updatedAt':
-        FieldValue.serverTimestamp(),
+        // Attachment utama.
+        'attachmentUrl': fileUrl,
+
+        // Legacy compatibility.
+        'fileUrl': fileUrl,
+
+        'fileName': fileName,
+        'fileSize': fileSize,
+        'fileType': fileType,
+
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // ----------------------------------------------------------
+      // ========================================================
       // DEADLINE
-      // ----------------------------------------------------------
+      // ========================================================
 
       if (_dueDate != null) {
-        data['dueDate'] =
-            Timestamp.fromDate(_dueDate!);
+        data['dueDate'] = Timestamp.fromDate(_dueDate!);
       } else {
         data['dueDate'] = null;
       }
 
-      // ----------------------------------------------------------
+      // ========================================================
       // ADD
-      // ----------------------------------------------------------
+      // ========================================================
 
       if (widget.assignmentId == null) {
         data['createdAt'] =
@@ -616,9 +843,9 @@ class _TeacherAssignmentFormScreenState
             .add(data);
       }
 
-      // ----------------------------------------------------------
+      // ========================================================
       // EDIT
-      // ----------------------------------------------------------
+      // ========================================================
 
       else {
         await _firestore
@@ -631,7 +858,10 @@ class _TeacherAssignmentFormScreenState
         return;
       }
 
-      Navigator.pop(context, true);
+      Navigator.pop(
+        context,
+        true,
+      );
     } catch (e) {
       if (!mounted) {
         return;
@@ -656,11 +886,13 @@ class _TeacherAssignmentFormScreenState
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-      ),
-    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
   }
 
   // ============================================================
@@ -680,21 +912,293 @@ class _TeacherAssignmentFormScreenState
       maxLines: maxLines,
       keyboardType: keyboardType,
       validator: validator,
+      enabled: !_saving,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon),
         alignLabelWithHint: maxLines > 1,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
+  }
+
+  // ============================================================
+  // FILE SECTION
+  // ============================================================
+
+  Widget _buildFileSection(ThemeData theme) {
+    final hasNewFile = _selectedFile != null;
+    final hasExistingFile = _existingFileUrl.isNotEmpty;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.attach_file_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Dokumen Tugas',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              'Upload file tugas yang akan digunakan oleh siswa.',
+              style: theme.textTheme.bodySmall,
+            ),
+
+            const SizedBox(height: 14),
+
+            // ==================================================
+            // FILE BARU
+            // ==================================================
+
+            if (hasNewFile)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _fileIcon(_selectedFileType),
+                      size: 34,
+                      color:
+                      theme.colorScheme.onPrimaryContainer,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _selectedFileName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                            theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${_selectedFileType.isEmpty ? 'FILE' : _selectedFileType} • '
+                                '${_formatFileSize(_selectedFileSize)}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed:
+                      _saving || _uploadingFile
+                          ? null
+                          : _removeSelectedFile,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              )
+
+            // ==================================================
+            // FILE LAMA
+            // ==================================================
+
+            else if (hasExistingFile)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color:
+                  theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _fileIcon(_existingFileType),
+                      size: 34,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _existingFileName.isEmpty
+                                ? 'Dokumen tugas'
+                                : _existingFileName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                            theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${_existingFileType.isEmpty ? 'FILE' : _existingFileType} • '
+                                '${_formatFileSize(_existingFileSize)}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Hapus lampiran',
+                      onPressed:
+                      _saving || _uploadingFile
+                          ? null
+                          : _removeExistingFile,
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
+                ),
+              )
+
+            // ==================================================
+            // TIDAK ADA FILE
+            // ==================================================
+
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color:
+                  theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.insert_drive_file_outlined,
+                      size: 32,
+                      color:
+                      theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Belum ada dokumen tugas.',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: 14),
+
+            // ==================================================
+            // PICK FILE BUTTON
+            // ==================================================
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed:
+                _saving || _uploadingFile
+                    ? null
+                    : _pickAssignmentFile,
+                icon:
+                _uploadingFile
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                )
+                    : const Icon(
+                  Icons.upload_file_outlined,
+                ),
+                label: Text(
+                  _uploadingFile
+                      ? 'Mengunggah...'
+                      : hasExistingFile || hasNewFile
+                      ? 'Ganti Dokumen'
+                      : 'Pilih Dokumen',
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              'Format: PDF, DOC, DOCX, PPT, PPTX, '
+                  'XLS, XLSX, ZIP, RAR, JPG, JPEG, PNG.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // FILE ICON
+  // ============================================================
+
+  IconData _fileIcon(String type) {
+    switch (type.toUpperCase()) {
+      case 'PDF':
+        return Icons.picture_as_pdf_outlined;
+
+      case 'DOC':
+      case 'DOCX':
+        return Icons.description_outlined;
+
+      case 'PPT':
+      case 'PPTX':
+        return Icons.slideshow_outlined;
+
+      case 'XLS':
+      case 'XLSX':
+        return Icons.table_chart_outlined;
+
+      case 'ZIP':
+      case 'RAR':
+        return Icons.folder_zip_outlined;
+
+      case 'JPG':
+      case 'JPEG':
+      case 'PNG':
+        return Icons.image_outlined;
+
+      default:
+        return Icons.insert_drive_file_outlined;
+    }
   }
 
   // ============================================================
   // COURSE & CLASS SECTION
   // ============================================================
 
-  Widget _buildCourseClassSection(
-      ThemeData theme,
-      ) {
+  Widget _buildCourseClassSection(ThemeData theme) {
     if (_loadingCourses || _loadingClasses) {
       return Card(
         margin: EdgeInsets.zero,
@@ -707,8 +1211,7 @@ class _TeacherAssignmentFormScreenState
                 height: 22,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color:
-                  theme.colorScheme.primary,
+                  color: theme.colorScheme.primary,
                 ),
               ),
               const SizedBox(width: 12),
@@ -767,9 +1270,7 @@ class _TeacherAssignmentFormScreenState
               const SizedBox(width: 12),
               const Expanded(
                 child: Text(
-                  'Belum ada kelas yang tersedia.\n\n'
-                      'Tambahkan kelas terlebih dahulu '
-                      'di collection classes.',
+                  'Belum ada kelas yang tersedia.',
                 ),
               ),
             ],
@@ -778,39 +1279,27 @@ class _TeacherAssignmentFormScreenState
       );
     }
 
-    // ============================================================
-    // VALIDASI VALUE COURSE UNTUK DROPDOWN
-    // ============================================================
-
     String? courseDropdownValue;
 
     if (_selectedCourseId != null) {
       final matchingCourses = _courses.where(
-            (course) =>
-        course.id == _selectedCourseId,
+            (course) => course.id == _selectedCourseId,
       );
 
       if (matchingCourses.length == 1) {
-        courseDropdownValue =
-            _selectedCourseId;
+        courseDropdownValue = _selectedCourseId;
       }
     }
-
-    // ============================================================
-    // VALIDASI VALUE CLASS UNTUK DROPDOWN
-    // ============================================================
 
     String? classDropdownValue;
 
     if (_selectedClassId != null) {
       final matchingClasses = _classes.where(
-            (classDoc) =>
-        classDoc.id == _selectedClassId,
+            (classDoc) => classDoc.id == _selectedClassId,
       );
 
       if (matchingClasses.length == 1) {
-        classDropdownValue =
-            _selectedClassId;
+        classDropdownValue = _selectedClassId;
       }
     }
 
@@ -822,26 +1311,17 @@ class _TeacherAssignmentFormScreenState
           crossAxisAlignment:
           CrossAxisAlignment.start,
           children: [
-            // ======================================================
-            // HEADER
-            // ======================================================
-
             Row(
               children: [
                 Icon(
                   Icons.menu_book_outlined,
-                  color:
-                  theme.colorScheme.primary,
+                  color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   'Course & Kelas',
-                  style: theme
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(
-                    fontWeight:
-                    FontWeight.bold,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
@@ -849,15 +1329,10 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ======================================================
-            // COURSE
-            // ======================================================
-
             DropdownButtonFormField<String>(
               value: courseDropdownValue,
               isExpanded: true,
-              decoration:
-              const InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Pilih Course',
                 prefixIcon: Icon(
                   Icons.library_books_outlined,
@@ -867,20 +1342,19 @@ class _TeacherAssignmentFormScreenState
                 final data = course.data();
 
                 final title =
-                (data['title'] ??
-                    'Course tanpa nama')
+                (data['title'] ?? 'Course tanpa nama')
                     .toString();
 
                 return DropdownMenuItem<String>(
                   value: course.id,
                   child: Text(
                     title,
-                    overflow:
-                    TextOverflow.ellipsis,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 );
               }).toList(),
-              onChanged: _saving
+              onChanged:
+              _saving
                   ? null
                   : (courseId) {
                 if (courseId == null) {
@@ -891,10 +1365,8 @@ class _TeacherAssignmentFormScreenState
                     Map<String, dynamic>>?
                 selected;
 
-                for (final course
-                in _courses) {
-                  if (course.id ==
-                      courseId) {
+                for (final course in _courses) {
+                  if (course.id == courseId) {
                     selected = course;
                     break;
                   }
@@ -907,8 +1379,7 @@ class _TeacherAssignmentFormScreenState
                 }
               },
               validator: (value) {
-                if (value == null ||
-                    value.isEmpty) {
+                if (value == null || value.isEmpty) {
                   return 'Course wajib dipilih';
                 }
 
@@ -918,15 +1389,10 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ======================================================
-            // CLASS
-            // ======================================================
-
             DropdownButtonFormField<String>(
               value: classDropdownValue,
               isExpanded: true,
-              decoration:
-              const InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Pilih Kelas',
                 prefixIcon: Icon(
                   Icons.groups_outlined,
@@ -937,12 +1403,12 @@ class _TeacherAssignmentFormScreenState
                   value: classDoc.id,
                   child: Text(
                     _getClassName(classDoc),
-                    overflow:
-                    TextOverflow.ellipsis,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 );
               }).toList(),
-              onChanged: _saving
+              onChanged:
+              _saving
                   ? null
                   : (classId) {
                 if (classId == null) {
@@ -953,10 +1419,8 @@ class _TeacherAssignmentFormScreenState
                     Map<String, dynamic>>?
                 selected;
 
-                for (final classDoc
-                in _classes) {
-                  if (classDoc.id ==
-                      classId) {
+                for (final classDoc in _classes) {
+                  if (classDoc.id == classId) {
                     selected = classDoc;
                     break;
                   }
@@ -969,56 +1433,12 @@ class _TeacherAssignmentFormScreenState
                 }
               },
               validator: (value) {
-                if (value == null ||
-                    value.isEmpty) {
+                if (value == null || value.isEmpty) {
                   return 'Kelas wajib dipilih';
                 }
 
                 return null;
               },
-            ),
-
-            const SizedBox(height: 12),
-
-            // ======================================================
-            // INFORMATION
-            // ======================================================
-
-            Container(
-              width: double.infinity,
-              padding:
-              const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: theme
-                    .colorScheme
-                    .surfaceContainerHighest,
-                borderRadius:
-                BorderRadius.circular(12),
-              ),
-              child: Row(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 20,
-                    color:
-                    theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Course dan kelas dipilih '
-                          'secara otomatis dari data '
-                          'Firestore. ID tidak perlu '
-                          'dimasukkan secara manual.',
-                      style: theme
-                          .textTheme
-                          .bodySmall,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
@@ -1030,17 +1450,14 @@ class _TeacherAssignmentFormScreenState
   // DATE SECTION
   // ============================================================
 
-  Widget _buildDateSection(
-      ThemeData theme,
-      ) {
+  Widget _buildDateSection(ThemeData theme) {
     final today = DateTime(
       DateTime.now().year,
       DateTime.now().month,
       DateTime.now().day,
     );
 
-    DateTime initialDate =
-        _dueDate ?? today;
+    DateTime initialDate = _dueDate ?? today;
 
     if (initialDate.isBefore(today)) {
       initialDate = today;
@@ -1058,18 +1475,13 @@ class _TeacherAssignmentFormScreenState
               children: [
                 Icon(
                   Icons.calendar_today_outlined,
-                  color:
-                  theme.colorScheme.primary,
+                  color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   'Deadline',
-                  style: theme
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(
-                    fontWeight:
-                    FontWeight.bold,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
@@ -1092,22 +1504,18 @@ class _TeacherAssignmentFormScreenState
 
             Container(
               width: double.infinity,
-              padding:
-              const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: theme
-                    .colorScheme
-                    .surfaceContainerHighest,
-                borderRadius:
-                BorderRadius.circular(12),
+                color:
+                theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
                   Icon(
                     Icons.event_available_outlined,
                     size: 20,
-                    color:
-                    theme.colorScheme.primary,
+                    color: theme.colorScheme.primary,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1116,28 +1524,24 @@ class _TeacherAssignmentFormScreenState
                           ? 'Belum memilih deadline'
                           : 'Deadline: '
                           '${_formatDate(_dueDate!)}',
-                      style: theme
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(
-                        fontWeight:
-                        FontWeight.w600,
+                      style:
+                      theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                   if (_dueDate != null)
                     IconButton(
-                      tooltip:
-                      'Hapus deadline',
-                      onPressed: _saving
+                      tooltip: 'Hapus deadline',
+                      onPressed:
+                      _saving
                           ? null
                           : () {
                         setState(() {
                           _dueDate = null;
                         });
                       },
-                      icon:
-                      const Icon(Icons.close),
+                      icon: const Icon(Icons.close),
                     ),
                 ],
               ),
@@ -1167,24 +1571,21 @@ class _TeacherAssignmentFormScreenState
       body: Form(
         key: _formKey,
         child: ListView(
-          padding:
-          const EdgeInsets.fromLTRB(
+          padding: const EdgeInsets.fromLTRB(
             16,
             16,
             16,
             32,
           ),
           children: [
-            // ======================================================
+            // ==================================================
             // TITLE
-            // ======================================================
+            // ==================================================
 
             _buildTextField(
-              controller:
-              _titleController,
+              controller: _titleController,
               label: 'Judul Tugas',
-              icon:
-              Icons.assignment_outlined,
+              icon: Icons.assignment_outlined,
               validator: (value) {
                 if (value == null ||
                     value.trim().isEmpty) {
@@ -1197,68 +1598,64 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 16),
 
-            // ======================================================
+            // ==================================================
             // DESCRIPTION
-            // ======================================================
+            // ==================================================
 
             _buildTextField(
-              controller:
-              _descriptionController,
+              controller: _descriptionController,
               label: 'Deskripsi',
-              icon:
-              Icons.description_outlined,
+              icon: Icons.description_outlined,
               maxLines: 4,
             ),
 
             const SizedBox(height: 16),
 
-            // ======================================================
+            // ==================================================
             // INSTRUCTIONS
-            // ======================================================
+            // ==================================================
 
             _buildTextField(
-              controller:
-              _instructionsController,
+              controller: _instructionsController,
               label: 'Instruksi',
-              icon:
-              Icons.rule_outlined,
+              icon: Icons.rule_outlined,
               maxLines: 4,
             ),
 
             const SizedBox(height: 16),
 
-            // ======================================================
+            // ==================================================
             // COURSE + CLASS
-            // ======================================================
+            // ==================================================
 
-            _buildCourseClassSection(
-              theme,
-            ),
+            _buildCourseClassSection(theme),
 
             const SizedBox(height: 16),
 
-            // ======================================================
-            // POINTS
-            // ======================================================
+            // ==================================================
+            // FILE
+            // ==================================================
+
+            _buildFileSection(theme),
+
+            const SizedBox(height: 16),
+
+            // ==================================================
+            // POINT
+            // ==================================================
 
             _buildTextField(
-              controller:
-              _pointsController,
+              controller: _pointsController,
               label: 'Nilai Maksimal',
-              icon:
-              Icons.star_outline,
-              keyboardType:
-              TextInputType.number,
+              icon: Icons.star_outline,
+              keyboardType: TextInputType.number,
               validator: (value) {
-                final points =
-                int.tryParse(
+                final points = int.tryParse(
                   value?.trim() ?? '',
                 );
 
-                if (points == null ||
-                    points <= 0) {
-                  return 'Nilai maksimal harus '
-                      'lebih dari 0';
+                if (points == null || points <= 0) {
+                  return 'Nilai maksimal harus lebih dari 0';
                 }
 
                 return null;
@@ -1267,31 +1664,31 @@ class _TeacherAssignmentFormScreenState
 
             const SizedBox(height: 20),
 
-            // ======================================================
+            // ==================================================
             // DEADLINE
-            // ======================================================
+            // ==================================================
 
             _buildDateSection(theme),
 
             const SizedBox(height: 24),
 
-            // ======================================================
-            // SAVE BUTTON
-            // ======================================================
+            // ==================================================
+            // SAVE
+            // ==================================================
 
             SizedBox(
               height: 52,
-              child:
-              FilledButton.icon(
-                onPressed: _saving
+              child: FilledButton.icon(
+                onPressed:
+                _saving || _uploadingFile
                     ? null
                     : _saveAssignment,
-                icon: _saving
+                icon:
+                _saving || _uploadingFile
                     ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child:
-                  CircularProgressIndicator(
+                  child: CircularProgressIndicator(
                     strokeWidth: 2,
                   ),
                 )
@@ -1299,7 +1696,9 @@ class _TeacherAssignmentFormScreenState
                   Icons.save_outlined,
                 ),
                 label: Text(
-                  _saving
+                  _uploadingFile
+                      ? 'Mengunggah dokumen...'
+                      : _saving
                       ? 'Menyimpan...'
                       : widget.isEdit
                       ? 'Simpan Perubahan'

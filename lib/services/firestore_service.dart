@@ -1,3 +1,4 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FirestoreService {
@@ -21,17 +22,10 @@ class FirestoreService {
   }
 
   int _toInt(dynamic value, {int defaultValue = 0}) {
-    if (value is int) {
-      return value;
-    }
+    if (value is int) return value;
+    if (value is double) return value.toInt();
 
-    if (value is double) {
-      return value.toInt();
-    }
-
-    return int.tryParse(
-      (value ?? '').toString().trim(),
-    ) ??
+    return int.tryParse((value ?? '').toString().trim()) ??
         defaultValue;
   }
 
@@ -213,21 +207,41 @@ class FirestoreService {
 
   Future<String> addMaterial({
     required String classId,
+    String className = '',
     required String teacherId,
+    String teacherName = '',
+    String courseId = '',
+    String courseName = '',
     required String subject,
     required String title,
     required String description,
+    String content = '',
     required String type,
-    required String fileUrl,
+    String fileUrl = '',
+    String attachmentUrl = '',
+    String videoUrl = '',
+    String videoFileName = '',
+    int videoSize = 0,
+    String courseLessonId = '',
   }) async {
     final doc = await materials.add({
       'classId': classId.trim(),
+      'className': className.trim(),
       'teacherId': teacherId.trim(),
+      'teacherName': teacherName.trim(),
+      'courseId': courseId.trim(),
+      'courseName': courseName.trim(),
       'subject': subject.trim(),
       'title': title.trim(),
       'description': description.trim(),
+      'content': content.trim(),
       'type': type.trim(),
       'fileUrl': fileUrl.trim(),
+      'attachmentUrl': attachmentUrl.trim(),
+      'videoUrl': videoUrl.trim(),
+      'videoFileName': videoFileName.trim(),
+      'videoSize': videoSize,
+      'courseLessonId': courseLessonId.trim(),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -238,21 +252,41 @@ class FirestoreService {
   Future<void> updateMaterial({
     required String id,
     required String classId,
+    String className = '',
     required String teacherId,
+    String teacherName = '',
+    String courseId = '',
+    String courseName = '',
     required String subject,
     required String title,
     required String description,
+    String content = '',
     required String type,
-    required String fileUrl,
+    String fileUrl = '',
+    String attachmentUrl = '',
+    String videoUrl = '',
+    String videoFileName = '',
+    int videoSize = 0,
+    String courseLessonId = '',
   }) async {
     await materials.doc(id).update({
       'classId': classId.trim(),
+      'className': className.trim(),
       'teacherId': teacherId.trim(),
+      'teacherName': teacherName.trim(),
+      'courseId': courseId.trim(),
+      'courseName': courseName.trim(),
       'subject': subject.trim(),
       'title': title.trim(),
       'description': description.trim(),
+      'content': content.trim(),
       'type': type.trim(),
       'fileUrl': fileUrl.trim(),
+      'attachmentUrl': attachmentUrl.trim(),
+      'videoUrl': videoUrl.trim(),
+      'videoFileName': videoFileName.trim(),
+      'videoSize': videoSize,
+      'courseLessonId': courseLessonId.trim(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -260,6 +294,19 @@ class FirestoreService {
   Future<void> deleteMaterial(String id) async {
     await materials.doc(id).delete();
   }
+
+
+  // ============================================================
+  // COURSES / MATA PELAJARAN
+  // ============================================================
+
+  CollectionReference<Map<String, dynamic>> get courses =>
+      _db.collection('courses');
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> getCourses() {
+    return courses.orderBy('title').snapshots();
+  }
+
 
   // ============================================================
   // QUIZZES
@@ -272,6 +319,14 @@ class FirestoreService {
     return quizzes.orderBy('title').snapshots();
   }
 
+  Stream<QuerySnapshot<Map<String, dynamic>>> getQuizzesByCourse(
+      String courseId,
+      ) {
+    return quizzes
+        .where('courseId', isEqualTo: courseId)
+        .snapshots();
+  }
+
   Future<String> addQuiz({
     required String classId,
     required String teacherId,
@@ -279,13 +334,23 @@ class FirestoreService {
     required String title,
     required int duration,
     required String description,
+    String courseId = '',
+    String courseName = '',
+    int passingScore = 70,
   }) async {
+    final resolvedCourseName = courseName.trim().isNotEmpty
+        ? courseName.trim()
+        : subject.trim();
+
     final doc = await quizzes.add({
       'classId': classId.trim(),
       'teacherId': teacherId.trim(),
       'subject': subject.trim(),
+      'courseId': courseId.trim(),
+      'courseName': resolvedCourseName,
       'title': title.trim(),
       'duration': duration,
+      'passingScore': passingScore,
       'description': description.trim(),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -302,13 +367,23 @@ class FirestoreService {
     required String title,
     required int duration,
     required String description,
+    String courseId = '',
+    String courseName = '',
+    int passingScore = 70,
   }) async {
+    final resolvedCourseName = courseName.trim().isNotEmpty
+        ? courseName.trim()
+        : subject.trim();
+
     await quizzes.doc(id).update({
       'classId': classId.trim(),
       'teacherId': teacherId.trim(),
       'subject': subject.trim(),
+      'courseId': courseId.trim(),
+      'courseName': resolvedCourseName,
       'title': title.trim(),
       'duration': duration,
+      'passingScore': passingScore,
       'description': description.trim(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -320,18 +395,24 @@ class FirestoreService {
 
   // ============================================================
   // QUIZ QUESTIONS
+  //
+  // Pertanyaan kuis disimpan di collection:
+  // quiz_questions/{questionId}
+  //
+  // Field:
+  // quizId, question, options, correctAnswer, points,
+  // order, createdAt, updatedAt.
   // ============================================================
 
-  CollectionReference<Map<String, dynamic>> quizQuestions(
-      String quizId,
-      ) {
-    return quizzes.doc(quizId).collection('questions');
-  }
+  CollectionReference<Map<String, dynamic>> get quizQuestions =>
+      _db.collection('quiz_questions');
 
   Stream<QuerySnapshot<Map<String, dynamic>>> getQuizQuestions(
       String quizId,
       ) {
-    return quizQuestions(quizId).snapshots();
+    return quizQuestions
+        .where('quizId', isEqualTo: quizId)
+        .snapshots();
   }
 
   Future<String> addQuizQuestion({
@@ -339,11 +420,23 @@ class FirestoreService {
     required String question,
     required List<String> options,
     required String answer,
+    int points = 100,
+    int order = 0,
   }) async {
-    final doc = await quizQuestions(quizId).add({
+    final optionMap = <String, String>{
+      'A': options.isNotEmpty ? options[0].trim() : '',
+      'B': options.length > 1 ? options[1].trim() : '',
+      'C': options.length > 2 ? options[2].trim() : '',
+      'D': options.length > 3 ? options[3].trim() : '',
+    };
+
+    final doc = await quizQuestions.add({
+      'quizId': quizId.trim(),
       'question': question.trim(),
-      'options': options,
-      'answer': answer.trim(),
+      'options': optionMap,
+      'correctAnswer': answer.trim().toUpperCase(),
+      'points': points,
+      'order': order,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -357,11 +450,23 @@ class FirestoreService {
     required String question,
     required List<String> options,
     required String answer,
+    int points = 100,
+    int order = 0,
   }) async {
-    await quizQuestions(quizId).doc(questionId).update({
+    final optionMap = <String, String>{
+      'A': options.isNotEmpty ? options[0].trim() : '',
+      'B': options.length > 1 ? options[1].trim() : '',
+      'C': options.length > 2 ? options[2].trim() : '',
+      'D': options.length > 3 ? options[3].trim() : '',
+    };
+
+    await quizQuestions.doc(questionId).update({
+      'quizId': quizId.trim(),
       'question': question.trim(),
-      'options': options,
-      'answer': answer.trim(),
+      'options': optionMap,
+      'correctAnswer': answer.trim().toUpperCase(),
+      'points': points,
+      'order': order,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -370,7 +475,18 @@ class FirestoreService {
     required String quizId,
     required String questionId,
   }) async {
-    await quizQuestions(quizId).doc(questionId).delete();
+    final questionDoc = quizQuestions.doc(questionId);
+    final snapshot = await questionDoc.get();
+
+    if (!snapshot.exists) return;
+
+    final data = snapshot.data() ?? <String, dynamic>{};
+
+    if ((data['quizId'] ?? '').toString() != quizId) {
+      throw Exception('Soal tidak sesuai dengan kuis yang dipilih.');
+    }
+
+    await questionDoc.delete();
   }
 
   // ============================================================
@@ -400,7 +516,7 @@ class FirestoreService {
     String endTime = '',
     String room = '',
   }) async {
-    final data = <String, dynamic>{
+    final doc = await exams.add({
       'classId': classId.trim(),
       'teacherId': teacherId.trim(),
       'teacherName': teacherName.trim(),
@@ -417,9 +533,7 @@ class FirestoreService {
       'room': room.trim(),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-    };
-
-    final doc = await exams.add(data);
+    });
 
     return doc.id;
   }
@@ -466,25 +580,6 @@ class FirestoreService {
 
   // ============================================================
   // EXAM QUESTIONS
-  //
-  // SCHEMA BARU:
-  //
-  // exam_questions/{questionId}
-  //
-  // examId
-  // question
-  // options: {
-  //   A: "...",
-  //   B: "...",
-  //   C: "...",
-  //   D: "..."
-  // }
-  // correctAnswer
-  // points
-  // order
-  // createdAt
-  // updatedAt
-  //
   // ============================================================
 
   CollectionReference<Map<String, dynamic>> get examQuestions =>
@@ -558,7 +653,18 @@ class FirestoreService {
     required String examId,
     required String questionId,
   }) async {
-    await examQuestions.doc(questionId).delete();
+    final questionDoc = examQuestions.doc(questionId);
+    final snapshot = await questionDoc.get();
+
+    if (!snapshot.exists) return;
+
+    final data = snapshot.data() ?? <String, dynamic>{};
+
+    if ((data['examId'] ?? '').toString() != examId) {
+      throw Exception('Soal tidak sesuai dengan ujian yang dipilih.');
+    }
+
+    await questionDoc.delete();
   }
 
   // ============================================================

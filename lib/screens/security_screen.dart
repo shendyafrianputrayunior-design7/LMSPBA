@@ -1,3 +1,4 @@
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -12,6 +13,7 @@ class SecurityScreen extends StatefulWidget {
 
 class _SecurityScreenState extends State<SecurityScreen> {
   bool _hasPassword = false;
+  bool _isChecking = true;
 
   @override
   void initState() {
@@ -19,50 +21,114 @@ class _SecurityScreenState extends State<SecurityScreen> {
     _checkPasswordProvider();
   }
 
-  void _checkPasswordProvider() {
-    final user = FirebaseAuth.instance.currentUser;
+  // =========================================================
+  // CHECK PASSWORD PROVIDER
+  // =========================================================
 
-    final hasPassword = user?.providerData.any(
-          (provider) => provider.providerId == 'password',
-    ) ??
-        false;
+  Future<void> _checkPasswordProvider() async {
+    final auth = FirebaseAuth.instance;
+    final user = auth.currentUser;
 
-    setState(() {
-      _hasPassword = hasPassword;
-    });
+    if (user == null) {
+      if (!mounted) return;
+
+      setState(() {
+        _hasPassword = false;
+        _isChecking = false;
+      });
+      return;
+    }
+
+    try {
+      // Perbarui data provider dari Firebase.
+      await user.reload();
+
+      final refreshedUser = auth.currentUser;
+
+      final hasPassword =
+          refreshedUser?.providerData.any(
+                (provider) => provider.providerId == 'password',
+          ) ??
+              false;
+
+      if (!mounted) return;
+
+      setState(() {
+        _hasPassword = hasPassword;
+        _isChecking = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isChecking = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to check account security status.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
+  // =========================================================
+  // OPEN CREATE / CHANGE PASSWORD PAGE
+  // =========================================================
+
   Future<void> _openPasswordPage() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      _showMessage('Please sign in again to continue.');
+      return;
+    }
+
     final result = await Navigator.pushNamed(
       context,
       AppRoutes.createPassword,
     );
 
-    if (result == true && mounted) {
-      _checkPasswordProvider();
+    if (!mounted) return;
+
+    if (result == true) {
+      await _checkPasswordProvider();
     }
   }
+
+  // =========================================================
+  // SHOW MESSAGE
+  // =========================================================
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
 
-      // ===================================================
       // APP BAR
-      // ===================================================
-
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
         foregroundColor: colorScheme.onSurface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-
         title: Text(
           'Security',
           style: theme.textTheme.titleLarge?.copyWith(
@@ -72,26 +138,12 @@ class _SecurityScreenState extends State<SecurityScreen> {
         ),
       ),
 
-      // ===================================================
       // BODY
-      // ===================================================
-
       body: SafeArea(
         child: ListView(
           physics: const BouncingScrollPhysics(),
-
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            30,
-          ),
-
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
           children: [
-            // =================================================
-            // ACCOUNT SECURITY
-            // =================================================
-
             Text(
               'Account Security',
               style: TextStyle(
@@ -103,10 +155,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
             const SizedBox(height: 10),
 
-            // =================================================
-            // EMAIL
-            // =================================================
-
+            // EMAIL CARD
             _buildSecurityCard(
               context: context,
               icon: Icons.email_outlined,
@@ -115,35 +164,39 @@ class _SecurityScreenState extends State<SecurityScreen> {
               showArrow: false,
             ),
 
-            // =================================================
-            // PASSWORD
-            // =================================================
-
+            // PASSWORD CARD
             _buildSecurityCard(
               context: context,
               icon: Icons.lock_outline_rounded,
               title: 'Password',
-              subtitle: _hasPassword
+              subtitle: _isChecking
+                  ? 'Checking password status...'
+                  : _hasPassword
                   ? 'Password is already set'
                   : 'Password has not been set',
-              showArrow: true,
-              onTap: _openPasswordPage,
+              showArrow: !_isChecking,
+              onTap: _isChecking ? null : _openPasswordPage,
+              trailing: _isChecking
+                  ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: colorScheme.primary,
+                ),
+              )
+                  : null,
             ),
 
             const SizedBox(height: 28),
 
-            // =================================================
-            // INFORMATION
-            // =================================================
-
+            // INFORMATION CARD
             Container(
               padding: const EdgeInsets.all(16),
-
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(16),
               ),
-
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -152,14 +205,14 @@ class _SecurityScreenState extends State<SecurityScreen> {
                     color: colorScheme.primary,
                     size: 22,
                   ),
-
                   const SizedBox(width: 12),
-
                   Expanded(
                     child: Text(
-                      _hasPassword
-                          ? 'Your account can now be used to sign in with your email and password or Google.'
-                          : 'Set a password to allow this account to sign in using email and password in addition to Google.',
+                      _isChecking
+                          ? 'Checking the sign-in methods available for your account.'
+                          : _hasPassword
+                          ? 'Your account can use email and password or Google to sign in, depending on the linked sign-in methods.'
+                          : 'Set a password to add email and password as a sign-in method alongside Google.',
                       style: TextStyle(
                         fontSize: 13,
                         height: 1.5,
@@ -187,46 +240,39 @@ class _SecurityScreenState extends State<SecurityScreen> {
     required String subtitle,
     required bool showArrow,
     VoidCallback? onTap,
+    Widget? trailing,
   }) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-
       decoration: BoxDecoration(
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-
         border: Border.all(
           color: colorScheme.outline,
         ),
       ),
-
       child: ListTile(
         onTap: onTap,
-
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
           vertical: 5,
         ),
-
         leading: Container(
           width: 44,
           height: 44,
-
           decoration: BoxDecoration(
             color: colorScheme.primary.withOpacity(0.10),
             borderRadius: BorderRadius.circular(13),
           ),
-
           child: Icon(
             icon,
             color: colorScheme.primary,
             size: 22,
           ),
         ),
-
         title: Text(
           title,
           style: TextStyle(
@@ -235,10 +281,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
             color: colorScheme.onSurface,
           ),
         ),
-
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 3),
-
           child: Text(
             subtitle,
             style: TextStyle(
@@ -247,13 +291,13 @@ class _SecurityScreenState extends State<SecurityScreen> {
             ),
           ),
         ),
-
-        trailing: showArrow
-            ? Icon(
-          Icons.chevron_right_rounded,
-          color: colorScheme.onSurfaceVariant,
-        )
-            : null,
+        trailing: trailing ??
+            (showArrow
+                ? Icon(
+              Icons.chevron_right_rounded,
+              color: colorScheme.onSurfaceVariant,
+            )
+                : null),
       ),
     );
   }

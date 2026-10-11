@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MaterialScreen extends StatefulWidget {
   const MaterialScreen({super.key});
@@ -52,12 +53,16 @@ class _MaterialScreenState extends State<MaterialScreen> {
           .doc(user.uid)
           .get();
 
-      final userData = userDoc.data() ?? <String, dynamic>{};
+      final userData =
+          userDoc.data() ?? <String, dynamic>{};
 
-      final classId = userData['classId']?.toString() ?? '';
+      final classId =
+          userData['classId']?.toString() ?? '';
 
       if (classId.isEmpty) {
-        throw Exception('Data kelas siswa belum tersedia.');
+        throw Exception(
+          'Data kelas siswa belum tersedia.',
+        );
       }
 
       // =====================================================
@@ -75,7 +80,8 @@ class _MaterialScreenState extends State<MaterialScreen> {
         final classData =
             classDoc.data() ?? <String, dynamic>{};
 
-        className = classData['name']?.toString() ?? classId;
+        className =
+            classData['name']?.toString() ?? classId;
       }
 
       // =====================================================
@@ -90,45 +96,203 @@ class _MaterialScreenState extends State<MaterialScreen> {
       )
           .get();
 
-      final materials = <Map<String, dynamic>>[];
+      final materials =
+      <Map<String, dynamic>>[];
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
 
+        // ===================================================
+        // TEACHER
+        // ===================================================
+
         String teacherName = 'Guru';
 
-        final teacherId = data['teacherId']?.toString() ?? '';
-
-        // ===================================================
-        // GET TEACHER
-        // ===================================================
+        final teacherId =
+            data['teacherId']?.toString() ?? '';
 
         if (teacherId.isNotEmpty) {
-          final teacherDoc = await FirebaseFirestore.instance
+          // -----------------------------------------------
+          // PRIORITAS: teachers/{teacherId}
+          // -----------------------------------------------
+
+          final teacherDoc =
+          await FirebaseFirestore.instance
               .collection('teachers')
               .doc(teacherId)
               .get();
 
           if (teacherDoc.exists) {
             final teacherData =
-                teacherDoc.data() ?? <String, dynamic>{};
+                teacherDoc.data() ??
+                    <String, dynamic>{};
 
-            teacherName =
-                teacherData['name']?.toString() ?? 'Guru';
+            final name =
+            (teacherData['name'] ??
+                teacherData['username'] ??
+                teacherData['displayName'] ??
+                '')
+                .toString()
+                .trim();
+
+            if (name.isNotEmpty) {
+              teacherName = name;
+            }
+          }
+
+          // -----------------------------------------------
+          // FALLBACK: teacherName dari material
+          // -----------------------------------------------
+
+          if (teacherName == 'Guru') {
+            final materialTeacherName =
+            (data['teacherName'] ?? '')
+                .toString()
+                .trim();
+
+            if (materialTeacherName.isNotEmpty) {
+              teacherName =
+                  materialTeacherName;
+            }
           }
         }
 
+        // ===================================================
+        // ATTACHMENT URL
+        // ===================================================
+        //
+        // Data baru:
+        // attachmentUrl
+        //
+        // Data lama:
+        // fileUrl
+        //
+        // attachmentUrl menjadi prioritas.
+        // ===================================================
+
+        final attachmentUrl =
+        (data['attachmentUrl'] ??
+            data['fileUrl'] ??
+            '')
+            .toString()
+            .trim();
+
+        // ===================================================
+        // VIDEO URL
+        // ===================================================
+
+        final videoUrl =
+        (data['videoUrl'] ?? '')
+            .toString()
+            .trim();
+
+        // ===================================================
+        // COURSE
+        // ===================================================
+
+        final courseId =
+        (data['courseId'] ?? '')
+            .toString();
+
+        final courseName =
+        (data['courseName'] ?? '')
+            .toString();
+
+        // ===================================================
+        // COURSE LESSON
+        // ===================================================
+
+        final courseLessonId =
+        (data['courseLessonId'] ?? '')
+            .toString();
+
         materials.add({
           'id': doc.id,
-          'subject': data['subject']?.toString() ?? '-',
-          'title': data['title']?.toString() ?? '-',
+
+          'subject':
+          data['subject']?.toString() ?? '-',
+
+          'title':
+          data['title']?.toString() ?? '-',
+
           'description':
           data['description']?.toString() ?? '-',
-          'type': data['type']?.toString() ?? 'Materi',
-          'fileUrl': data['fileUrl']?.toString() ?? '',
-          'teacher': teacherName,
+
+          'content':
+          data['content']?.toString() ?? '',
+
+          'type':
+          data['type']?.toString() ?? 'Materi',
+
+          // -----------------------------------------------
+          // CANONICAL ATTACHMENT
+          // -----------------------------------------------
+
+          'attachmentUrl':
+          attachmentUrl,
+
+          // -----------------------------------------------
+          // LEGACY FILE URL
+          // -----------------------------------------------
+
+          'fileUrl':
+          data['fileUrl']?.toString() ?? '',
+
+          // -----------------------------------------------
+          // VIDEO
+          // -----------------------------------------------
+
+          'videoUrl':
+          videoUrl,
+
+          'videoFileName':
+          data['videoFileName']?.toString() ?? '',
+
+          'videoSize':
+          data['videoSize'] ?? 0,
+
+          // -----------------------------------------------
+          // COURSE
+          // -----------------------------------------------
+
+          'courseId':
+          courseId,
+
+          'courseName':
+          courseName,
+
+          // -----------------------------------------------
+          // COURSE LESSON
+          // -----------------------------------------------
+
+          'courseLessonId':
+          courseLessonId,
+
+          // -----------------------------------------------
+          // TEACHER
+          // -----------------------------------------------
+
+          'teacher':
+          teacherName,
+
+          'teacherId':
+          teacherId,
         });
       }
+
+      // =====================================================
+      // SORT MATERIAL
+      // =====================================================
+
+      materials.sort((a, b) {
+        final titleA =
+            a['title']?.toString().toLowerCase() ?? '';
+
+        final titleB =
+            b['title']?.toString().toLowerCase() ?? '';
+
+        return titleA.compareTo(titleB);
+      });
 
       // =====================================================
       // UPDATE STATE
@@ -144,16 +308,140 @@ class _MaterialScreenState extends State<MaterialScreen> {
         _errorMessage = null;
       });
     } catch (e) {
-      debugPrint('Gagal mengambil materi: $e');
+      debugPrint(
+        'Gagal mengambil materi: $e',
+      );
 
       if (!mounted) return;
 
       setState(() {
         _loading = false;
         _errorMessage =
-            e.toString().replaceFirst('Exception: ', '');
+            e.toString().replaceFirst(
+              'Exception: ',
+              '',
+            );
       });
     }
+  }
+
+  // =========================================================
+  // GET MATERIAL URL
+  // =========================================================
+
+  String _getMaterialUrl(
+      Map<String, dynamic> material,
+      ) {
+    final attachmentUrl =
+        material['attachmentUrl']
+            ?.toString()
+            .trim() ??
+            '';
+
+    if (attachmentUrl.isNotEmpty) {
+      return attachmentUrl;
+    }
+
+    final fileUrl =
+        material['fileUrl']
+            ?.toString()
+            .trim() ??
+            '';
+
+    if (fileUrl.isNotEmpty) {
+      return fileUrl;
+    }
+
+    return '';
+  }
+
+  // =========================================================
+  // GET VIDEO URL
+  // =========================================================
+
+  String _getVideoUrl(
+      Map<String, dynamic> material,
+      ) {
+    return material['videoUrl']
+        ?.toString()
+        .trim() ??
+        '';
+  }
+
+  // =========================================================
+  // OPEN URL
+  // =========================================================
+
+  Future<void> _openUrl(
+      String url,
+      ) async {
+    final cleanUrl = url.trim();
+
+    if (cleanUrl.isEmpty) {
+      _showMessage(
+        'URL materi tidak tersedia.',
+      );
+      return;
+    }
+
+    Uri? uri;
+
+    try {
+      uri = Uri.parse(cleanUrl);
+    } catch (_) {
+      _showMessage(
+        'URL materi tidak valid.',
+      );
+      return;
+    }
+
+    if (!uri.hasScheme) {
+      _showMessage(
+        'URL materi tidak valid.',
+      );
+      return;
+    }
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched) {
+        _showMessage(
+          'Materi tidak dapat dibuka.',
+        );
+      }
+    } catch (e) {
+      debugPrint(
+        'Gagal membuka URL: $e',
+      );
+
+      _showMessage(
+        'Gagal membuka materi.',
+      );
+    }
+  }
+
+  // =========================================================
+  // MESSAGE
+  // =========================================================
+
+  void _showMessage(
+      String message,
+      ) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+        .hideCurrentSnackBar();
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+      SnackBar(
+        content: Text(message),
+      ),
+    );
   }
 
   // =========================================================
@@ -166,11 +454,13 @@ class _MaterialScreenState extends State<MaterialScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor:
+      theme.scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor:
+        theme.scaffoldBackgroundColor,
         title: const Text(
           'Materials',
           style: TextStyle(
@@ -179,7 +469,8 @@ class _MaterialScreenState extends State<MaterialScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: _loading ? null : _loadMaterials,
+            onPressed:
+            _loading ? null : _loadMaterials,
             icon: const Icon(
               Icons.refresh_rounded,
             ),
@@ -220,17 +511,20 @@ class _MaterialScreenState extends State<MaterialScreen> {
     return RefreshIndicator(
       onRefresh: _loadMaterials,
       child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(
+        physics:
+        const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),
         ),
-        padding: const EdgeInsets.fromLTRB(
+        padding:
+        const EdgeInsets.fromLTRB(
           20,
           8,
           20,
           30,
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
             // =================================================
             // HEADER
@@ -256,7 +550,8 @@ class _MaterialScreenState extends State<MaterialScreen> {
                   .textTheme
                   .bodyMedium
                   ?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+                color:
+                colorScheme.onSurfaceVariant,
               ),
             ),
 
@@ -285,22 +580,15 @@ class _MaterialScreenState extends State<MaterialScreen> {
 
             const SizedBox(height: 14),
 
-            // =================================================
-            // EMPTY
-            // =================================================
-
             if (_materials.isEmpty)
               _buildEmptyState(context),
 
-            // =================================================
-            // LIST
-            // =================================================
-
             ..._materials.map(
-                  (material) => _buildMaterialCard(
-                context,
-                material,
-              ),
+                  (material) =>
+                  _buildMaterialCard(
+                    context,
+                    material,
+                  ),
             ),
           ],
         ),
@@ -318,47 +606,70 @@ class _MaterialScreenState extends State<MaterialScreen> {
       ) {
     final theme = Theme.of(context);
 
-    final pdfCount = _materials.where((item) {
-      return item['type']
-          .toString()
-          .toLowerCase() ==
-          'pdf';
-    }).length;
+    final pdfCount = _materials.where(
+          (item) {
+        return item['type']
+            .toString()
+            .toLowerCase() ==
+            'pdf';
+      },
+    ).length;
 
-    final otherCount = _materials.length - pdfCount;
+    final videoCount = _materials.where(
+          (item) {
+        return item['type']
+            .toString()
+            .toLowerCase() ==
+            'video';
+      },
+    ).length;
+
+    final otherCount =
+        _materials.length -
+            pdfCount -
+            videoCount;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius:
+        BorderRadius.circular(22),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
             colorScheme.primary,
-            colorScheme.primary.withOpacity(0.78),
+            colorScheme.primary
+                .withOpacity(0.78),
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: colorScheme.primary.withOpacity(0.20),
+            color: colorScheme.primary
+                .withOpacity(0.20),
             blurRadius: 18,
-            offset: const Offset(0, 8),
+            offset:
+            const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
                 width: 48,
                 height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(15),
+                decoration:
+                BoxDecoration(
+                  color: Colors.white
+                      .withOpacity(0.16),
+                  borderRadius:
+                  BorderRadius.circular(
+                      15),
                 ),
                 child: const Icon(
                   Icons.menu_book_rounded,
@@ -369,20 +680,34 @@ class _MaterialScreenState extends State<MaterialScreen> {
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
                   children: [
                     Text(
                       'Materi Tersedia',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                      style: theme
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(
+                        color:
+                        Colors.white,
+                        fontWeight:
+                        FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(
+                        height: 3),
                     Text(
                       '${_materials.length} materi pembelajaran',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.white.withOpacity(0.85),
+                      style: theme
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                        color: Colors
+                            .white
+                            .withOpacity(
+                            0.85),
                       ),
                     ),
                   ],
@@ -396,19 +721,29 @@ class _MaterialScreenState extends State<MaterialScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildSummaryItem(
+                child:
+                _buildSummaryItem(
                   'Total',
                   _materials.length,
                 ),
               ),
               Expanded(
-                child: _buildSummaryItem(
+                child:
+                _buildSummaryItem(
                   'PDF',
                   pdfCount,
                 ),
               ),
               Expanded(
-                child: _buildSummaryItem(
+                child:
+                _buildSummaryItem(
+                  'Video',
+                  videoCount,
+                ),
+              ),
+              Expanded(
+                child:
+                _buildSummaryItem(
                   'Lainnya',
                   otherCount,
                 ),
@@ -435,16 +770,19 @@ class _MaterialScreenState extends State<MaterialScreen> {
           style: const TextStyle(
             color: Colors.white,
             fontSize: 21,
-            fontWeight: FontWeight.w800,
+            fontWeight:
+            FontWeight.w800,
           ),
         ),
         const SizedBox(height: 3),
         Text(
           label,
           style: TextStyle(
-            color: Colors.white.withOpacity(0.80),
+            color: Colors.white
+                .withOpacity(0.80),
             fontSize: 11,
-            fontWeight: FontWeight.w600,
+            fontWeight:
+            FontWeight.w600,
           ),
         ),
       ],
@@ -459,13 +797,31 @@ class _MaterialScreenState extends State<MaterialScreen> {
       BuildContext context,
       Map<String, dynamic> material,
       ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final theme =
+    Theme.of(context);
+    final colorScheme =
+        theme.colorScheme;
 
-    final type = material['type']?.toString() ?? 'Materi';
+    final type =
+        material['type']
+            ?.toString() ??
+            'Materi';
+
+    final videoUrl =
+    _getVideoUrl(material);
+
+    final attachmentUrl =
+    _getMaterialUrl(material);
+
+    final hasVideo =
+        videoUrl.isNotEmpty;
+
+    final hasAttachment =
+        attachmentUrl.isNotEmpty;
 
     return InkWell(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius:
+      BorderRadius.circular(20),
       onTap: () {
         _showMaterialDetail(
           context,
@@ -474,17 +830,27 @@ class _MaterialScreenState extends State<MaterialScreen> {
       },
       child: Container(
         width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(20),
+        margin:
+        const EdgeInsets.only(
+            bottom: 14),
+        padding:
+        const EdgeInsets.all(16),
+        decoration:
+        BoxDecoration(
+          color:
+          colorScheme.surface,
+          borderRadius:
+          BorderRadius.circular(
+              20),
           border: Border.all(
-            color: colorScheme.outline.withOpacity(0.40),
+            color: colorScheme
+                .outline
+                .withOpacity(0.40),
           ),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
             // =================================================
             // ICON
@@ -493,18 +859,26 @@ class _MaterialScreenState extends State<MaterialScreen> {
             Container(
               width: 54,
               height: 54,
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(16),
+              decoration:
+              BoxDecoration(
+                color: colorScheme
+                    .primary
+                    .withOpacity(0.10),
+                borderRadius:
+                BorderRadius.circular(
+                    16),
               ),
               child: Icon(
-                _getMaterialIcon(type),
-                color: colorScheme.primary,
+                _getMaterialIcon(
+                    type),
+                color:
+                colorScheme.primary,
                 size: 27,
               ),
             ),
 
-            const SizedBox(width: 13),
+            const SizedBox(
+                width: 13),
 
             // =================================================
             // CONTENT
@@ -512,91 +886,205 @@ class _MaterialScreenState extends State<MaterialScreen> {
 
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment
+                    .start,
                 children: [
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
                     children: [
                       Expanded(
                         child: Text(
-                          material['title']?.toString() ?? '-',
+                          material[
+                          'title']
+                              ?.toString() ??
+                              '-',
                           maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                          theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                          overflow:
+                          TextOverflow
+                              .ellipsis,
+                          style: theme
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                            fontWeight:
+                            FontWeight
+                                .w800,
                           ),
                         ),
                       ),
-
-                      const SizedBox(width: 8),
-
+                      const SizedBox(
+                          width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(
+                        padding:
+                        const EdgeInsets
+                            .symmetric(
                           horizontal: 9,
                           vertical: 5,
                         ),
-                        decoration: BoxDecoration(
-                          color:
-                          colorScheme.primary.withOpacity(0.10),
-                          borderRadius: BorderRadius.circular(8),
+                        decoration:
+                        BoxDecoration(
+                          color: colorScheme
+                              .primary
+                              .withOpacity(
+                              0.10),
+                          borderRadius:
+                          BorderRadius
+                              .circular(
+                              8),
                         ),
                         child: Text(
                           type,
                           style: TextStyle(
-                            color: colorScheme.primary,
+                            color:
+                            colorScheme
+                                .primary,
                             fontSize: 10,
-                            fontWeight: FontWeight.w800,
+                            fontWeight:
+                            FontWeight
+                                .w800,
                           ),
                         ),
                       ),
                     ],
                   ),
 
-                  const SizedBox(height: 7),
+                  const SizedBox(
+                      height: 7),
 
                   Text(
-                    material['subject']?.toString() ?? '-',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.primary,
-                      fontWeight: FontWeight.w700,
+                    material['subject']
+                        ?.toString() ??
+                        '-',
+                    style: theme
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(
+                      color: colorScheme
+                          .primary,
+                      fontWeight:
+                      FontWeight
+                          .w700,
                     ),
                   ),
 
-                  const SizedBox(height: 5),
+                  const SizedBox(
+                      height: 5),
 
                   Text(
-                    material['description']?.toString() ?? '-',
+                    material[
+                    'description']
+                        ?.toString() ??
+                        '-',
                     maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
+                    overflow:
+                    TextOverflow
+                        .ellipsis,
+                    style: theme
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(
+                      color: colorScheme
+                          .onSurfaceVariant,
                       height: 1.4,
                     ),
                   ),
 
-                  const SizedBox(height: 10),
+                  const SizedBox(
+                      height: 10),
 
                   Row(
                     children: [
                       Icon(
-                        Icons.person_outline_rounded,
+                        Icons
+                            .person_outline_rounded,
                         size: 15,
-                        color: colorScheme.onSurfaceVariant,
+                        color: colorScheme
+                            .onSurfaceVariant,
                       ),
-                      const SizedBox(width: 5),
+                      const SizedBox(
+                          width: 5),
                       Expanded(
                         child: Text(
-                          material['teacher']?.toString() ?? 'Guru',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
+                          material[
+                          'teacher']
+                              ?.toString() ??
+                              'Guru',
+                          style: theme
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                            color: colorScheme
+                                .onSurfaceVariant,
                           ),
                         ),
                       ),
+                    ],
+                  ),
+
+                  // =================================================
+                  // RESOURCE CHIPS
+                  // =================================================
+
+                  if (hasVideo ||
+                      hasAttachment)
+                    Padding(
+                      padding:
+                      const EdgeInsets
+                          .only(
+                        top: 10,
+                      ),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (hasVideo)
+                            _buildResourceChip(
+                              context,
+                              Icons
+                                  .play_circle_outline,
+                              'Video',
+                            ),
+                          if (hasAttachment)
+                            _buildResourceChip(
+                              context,
+                              Icons
+                                  .attach_file,
+                              'Lampiran',
+                            ),
+                        ],
+                      ),
+                    ),
+
+                  const SizedBox(
+                      height: 8),
+
+                  Row(
+                    mainAxisAlignment:
+                    MainAxisAlignment
+                        .end,
+                    children: [
+                      Text(
+                        'Lihat materi',
+                        style: TextStyle(
+                          color: colorScheme
+                              .primary,
+                          fontSize: 12,
+                          fontWeight:
+                          FontWeight
+                              .w700,
+                        ),
+                      ),
+                      const SizedBox(
+                          width: 6),
                       Icon(
-                        Icons.arrow_forward_ios_rounded,
+                        Icons
+                            .arrow_forward_ios_rounded,
                         size: 14,
-                        color: colorScheme.onSurfaceVariant,
+                        color: colorScheme
+                            .primary,
                       ),
                     ],
                   ),
@@ -610,6 +1098,58 @@ class _MaterialScreenState extends State<MaterialScreen> {
   }
 
   // =========================================================
+  // RESOURCE CHIP
+  // =========================================================
+
+  Widget _buildResourceChip(
+      BuildContext context,
+      IconData icon,
+      String label,
+      ) {
+    final colorScheme =
+        Theme.of(context).colorScheme;
+
+    return Container(
+      padding:
+      const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 5,
+      ),
+      decoration:
+      BoxDecoration(
+        color: colorScheme
+            .surfaceContainerHighest,
+        borderRadius:
+        BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize:
+        MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color:
+            colorScheme.primary,
+          ),
+          const SizedBox(
+              width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight:
+              FontWeight.w700,
+              color: colorScheme
+                  .onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
   // MATERIAL DETAIL
   // =========================================================
 
@@ -617,92 +1157,153 @@ class _MaterialScreenState extends State<MaterialScreen> {
       BuildContext context,
       Map<String, dynamic> material,
       ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final theme =
+    Theme.of(context);
+    final colorScheme =
+        theme.colorScheme;
+
+    final attachmentUrl =
+    _getMaterialUrl(material);
+
+    final videoUrl =
+    _getVideoUrl(material);
+
+    final hasAttachment =
+        attachmentUrl.isNotEmpty;
+
+    final hasVideo =
+        videoUrl.isNotEmpty;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor:
+      Colors.transparent,
       builder: (context) {
         return Container(
-          decoration: BoxDecoration(
-            color: theme.scaffoldBackgroundColor,
-            borderRadius: const BorderRadius.vertical(
+          decoration:
+          BoxDecoration(
+            color: theme
+                .scaffoldBackgroundColor,
+            borderRadius:
+            const BorderRadius
+                .vertical(
               top: Radius.circular(28),
             ),
           ),
-          padding: const EdgeInsets.fromLTRB(
+          padding:
+          const EdgeInsets.fromLTRB(
             20,
             12,
             20,
             30,
           ),
           child: SafeArea(
-            child: SingleChildScrollView(
+            child:
+            SingleChildScrollView(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment
+                    .start,
                 children: [
                   // =================================================
                   // HANDLE
                   // =================================================
 
                   Center(
-                    child: Container(
+                    child:
+                    Container(
                       width: 42,
                       height: 4,
-                      decoration: BoxDecoration(
-                        color:
-                        colorScheme.onSurface.withOpacity(0.20),
-                        borderRadius: BorderRadius.circular(20),
+                      decoration:
+                      BoxDecoration(
+                        color: colorScheme
+                            .onSurface
+                            .withOpacity(
+                            0.20),
+                        borderRadius:
+                        BorderRadius
+                            .circular(
+                            20),
                       ),
                     ),
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(
+                      height: 24),
 
                   // =================================================
                   // TITLE
                   // =================================================
 
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
                     children: [
                       Container(
                         width: 58,
                         height: 58,
-                        decoration: BoxDecoration(
-                          color:
-                          colorScheme.primary.withOpacity(0.10),
-                          borderRadius: BorderRadius.circular(17),
+                        decoration:
+                        BoxDecoration(
+                          color: colorScheme
+                              .primary
+                              .withOpacity(
+                              0.10),
+                          borderRadius:
+                          BorderRadius
+                              .circular(
+                              17),
                         ),
                         child: Icon(
                           _getMaterialIcon(
-                            material['type']?.toString() ?? '',
+                            material[
+                            'type']
+                                ?.toString() ??
+                                '',
                           ),
-                          color: colorScheme.primary,
+                          color: colorScheme
+                              .primary,
                           size: 29,
                         ),
                       ),
-
-                      const SizedBox(width: 14),
-
+                      const SizedBox(
+                          width: 14),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child:
+                        Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment
+                              .start,
                           children: [
                             Text(
-                              material['title']?.toString() ?? '-',
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
+                              material[
+                              'title']
+                                  ?.toString() ??
+                                  '-',
+                              style: theme
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                fontWeight:
+                                FontWeight
+                                    .w800,
                               ),
                             ),
-                            const SizedBox(height: 5),
+                            const SizedBox(
+                                height: 5),
                             Text(
-                              material['subject']?.toString() ?? '-',
-                              style: TextStyle(
-                                color: colorScheme.primary,
-                                fontWeight: FontWeight.w700,
+                              material[
+                              'subject']
+                                  ?.toString() ??
+                                  '-',
+                              style:
+                              TextStyle(
+                                color: colorScheme
+                                    .primary,
+                                fontWeight:
+                                FontWeight
+                                    .w700,
                               ),
                             ),
                           ],
@@ -711,7 +1312,8 @@ class _MaterialScreenState extends State<MaterialScreen> {
                     ],
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(
+                      height: 24),
 
                   // =================================================
                   // INFO
@@ -719,21 +1321,62 @@ class _MaterialScreenState extends State<MaterialScreen> {
 
                   _buildDetailRow(
                     context,
-                    Icons.person_outline_rounded,
+                    Icons
+                        .person_outline_rounded,
                     'Guru',
-                    material['teacher']?.toString() ?? '-',
+                    material[
+                    'teacher']
+                        ?.toString() ??
+                        '-',
                   ),
 
-                  const SizedBox(height: 14),
+                  const SizedBox(
+                      height: 14),
 
                   _buildDetailRow(
                     context,
-                    Icons.category_outlined,
+                    Icons
+                        .category_outlined,
                     'Tipe',
-                    material['type']?.toString() ?? '-',
+                    material[
+                    'type']
+                        ?.toString() ??
+                        '-',
                   ),
 
-                  const SizedBox(height: 22),
+                  if ((material[
+                  'courseName']
+                      ?.toString()
+                      .isNotEmpty ??
+                      false)) ...[
+                    const SizedBox(
+                        height: 14),
+                    _buildDetailRow(
+                      context,
+                      Icons
+                          .menu_book_outlined,
+                      'Course',
+                      material[
+                      'courseName']
+                          ?.toString() ??
+                          '-',
+                    ),
+                  ],
+
+                  if (_className.isNotEmpty) ...[
+                    const SizedBox(
+                        height: 14),
+                    _buildDetailRow(
+                      context,
+                      Icons
+                          .groups_outlined,
+                      'Kelas',
+                      _className,
+                    ),
+                  ],
+
+                  const SizedBox(
+                      height: 22),
 
                   // =================================================
                   // DESCRIPTION
@@ -741,46 +1384,173 @@ class _MaterialScreenState extends State<MaterialScreen> {
 
                   Text(
                     'Deskripsi',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+                    style: theme
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(
+                      fontWeight:
+                      FontWeight.w800,
                     ),
                   ),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(
+                      height: 8),
 
                   Text(
-                    material['description']?.toString() ?? '-',
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    material[
+                    'description']
+                        ?.toString() ??
+                        '-',
+                    style: theme
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(
                       height: 1.6,
-                      color: colorScheme.onSurfaceVariant,
+                      color: colorScheme
+                          .onSurfaceVariant,
                     ),
                   ),
 
-                  const SizedBox(height: 24),
-
                   // =================================================
-                  // FILE BUTTON
+                  // CONTENT
                   // =================================================
 
-                  if (_hasFileUrl(material))
+                  if ((material[
+                  'content']
+                      ?.toString()
+                      .trim()
+                      .isNotEmpty ??
+                      false)) ...[
+                    const SizedBox(
+                        height: 24),
+                    Text(
+                      'Isi Materi',
+                      style: theme
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(
+                        fontWeight:
+                        FontWeight
+                            .w800,
+                      ),
+                    ),
+                    const SizedBox(
+                        height: 8),
+                    Text(
+                      material[
+                      'content']
+                          ?.toString() ??
+                          '',
+                      style: theme
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(
+                        height: 1.6,
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(
+                      height: 24),
+
+                  // =================================================
+                  // VIDEO
+                  // =================================================
+
+                  if (hasVideo)
                     SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
+                      width:
+                      double.infinity,
+                      child:
+                      FilledButton.icon(
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'File materi tersedia.',
-                              ),
-                            ),
-                          );
+                          _openUrl(
+                              videoUrl);
                         },
-                        icon: const Icon(
-                          Icons.download_rounded,
+                        icon:
+                        const Icon(
+                          Icons
+                              .play_circle_fill,
                         ),
-                        label: const Text(
+                        label:
+                        const Text(
+                          'Buka Video',
+                        ),
+                      ),
+                    ),
+
+                  // =================================================
+                  // ATTACHMENT
+                  // =================================================
+
+                  if (hasAttachment) ...[
+                    if (hasVideo)
+                      const SizedBox(
+                          height: 10),
+                    SizedBox(
+                      width:
+                      double.infinity,
+                      child:
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          _openUrl(
+                              attachmentUrl);
+                        },
+                        icon:
+                        const Icon(
+                          Icons
+                              .open_in_new_rounded,
+                        ),
+                        label:
+                        const Text(
                           'Buka Materi',
                         ),
+                      ),
+                    ),
+                  ],
+
+                  // =================================================
+                  // NO RESOURCE
+                  // =================================================
+
+                  if (!hasVideo &&
+                      !hasAttachment)
+                    Container(
+                      width:
+                      double.infinity,
+                      padding:
+                      const EdgeInsets
+                          .all(14),
+                      decoration:
+                      BoxDecoration(
+                        color: colorScheme
+                            .surfaceContainerHighest,
+                        borderRadius:
+                        BorderRadius
+                            .circular(
+                            12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons
+                                .info_outline,
+                            color: colorScheme
+                                .onSurfaceVariant,
+                          ),
+                          const SizedBox(
+                              width: 10),
+                          Expanded(
+                            child: Text(
+                              'Belum ada file atau URL lampiran untuk materi ini.',
+                              style:
+                              TextStyle(
+                                color: colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],
@@ -802,38 +1572,40 @@ class _MaterialScreenState extends State<MaterialScreen> {
       String label,
       String value,
       ) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme =
+        Theme.of(context).colorScheme;
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+      CrossAxisAlignment.start,
       children: [
         Icon(
           icon,
           size: 20,
-          color: colorScheme.primary,
+          color:
+          colorScheme.primary,
         ),
-
         const SizedBox(width: 10),
-
         SizedBox(
           width: 70,
           child: Text(
             label,
             style: TextStyle(
-              color: colorScheme.onSurfaceVariant,
+              color: colorScheme
+                  .onSurfaceVariant,
               fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontWeight:
+              FontWeight.w600,
             ),
           ),
         ),
-
         const SizedBox(width: 10),
-
         Expanded(
           child: Text(
             value,
             style: const TextStyle(
-              fontWeight: FontWeight.w700,
+              fontWeight:
+              FontWeight.w700,
             ),
           ),
         ),
@@ -848,43 +1620,61 @@ class _MaterialScreenState extends State<MaterialScreen> {
   Widget _buildEmptyState(
       BuildContext context,
       ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final theme =
+    Theme.of(context);
+    final colorScheme =
+        theme.colorScheme;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
+      padding:
+      const EdgeInsets.all(30),
+      decoration:
+      BoxDecoration(
+        color:
+        colorScheme.surface,
+        borderRadius:
+        BorderRadius.circular(
+            20),
         border: Border.all(
-          color: colorScheme.outline.withOpacity(0.35),
+          color: colorScheme
+              .outline
+              .withOpacity(0.35),
         ),
       ),
       child: Column(
         children: [
           Icon(
-            Icons.menu_book_outlined,
+            Icons
+                .menu_book_outlined,
             size: 52,
-            color: colorScheme.primary,
+            color:
+            colorScheme.primary,
           ),
-
-          const SizedBox(height: 14),
-
+          const SizedBox(
+              height: 14),
           Text(
             'Belum Ada Materi',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
+            style: theme
+                .textTheme
+                .titleMedium
+                ?.copyWith(
+              fontWeight:
+              FontWeight.w800,
             ),
           ),
-
-          const SizedBox(height: 7),
-
+          const SizedBox(
+              height: 7),
           Text(
             'Belum ada materi pembelajaran yang tersedia untuk kelas kamu.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+            textAlign:
+            TextAlign.center,
+            style: theme
+                .textTheme
+                .bodySmall
+                ?.copyWith(
+              color: colorScheme
+                  .onSurfaceVariant,
             ),
           ),
         ],
@@ -900,55 +1690,79 @@ class _MaterialScreenState extends State<MaterialScreen> {
       BuildContext context,
       String message,
       ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final theme =
+    Theme.of(context);
+    final colorScheme =
+        theme.colorScheme;
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding:
+        const EdgeInsets.all(
+            24),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment:
+          MainAxisAlignment
+              .center,
           children: [
             Container(
               width: 70,
               height: 70,
-              decoration: BoxDecoration(
-                color: colorScheme.error.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(20),
+              decoration:
+              BoxDecoration(
+                color: colorScheme
+                    .error
+                    .withOpacity(
+                    0.10),
+                borderRadius:
+                BorderRadius
+                    .circular(
+                    20),
               ),
               child: Icon(
-                Icons.error_outline_rounded,
+                Icons
+                    .error_outline_rounded,
                 size: 36,
-                color: colorScheme.error,
+                color:
+                colorScheme.error,
               ),
             ),
-
-            const SizedBox(height: 16),
-
+            const SizedBox(
+                height: 16),
             Text(
               'Gagal Memuat Materi',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
+              textAlign:
+              TextAlign.center,
+              style: theme
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(
+                fontWeight:
+                FontWeight.w800,
               ),
             ),
-
-            const SizedBox(height: 8),
-
+            const SizedBox(
+                height: 8),
             Text(
               message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+              textAlign:
+              TextAlign.center,
+              style: theme
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(
+                color: colorScheme
+                    .onSurfaceVariant,
               ),
             ),
-
-            const SizedBox(height: 18),
-
+            const SizedBox(
+                height: 18),
             FilledButton.icon(
-              onPressed: _loadMaterials,
+              onPressed:
+              _loadMaterials,
               icon: const Icon(
-                Icons.refresh_rounded,
+                Icons
+                    .refresh_rounded,
               ),
               label: const Text(
                 'Coba Lagi',
@@ -961,20 +1775,6 @@ class _MaterialScreenState extends State<MaterialScreen> {
   }
 
   // =========================================================
-  // CHECK FILE URL
-  // =========================================================
-
-  bool _hasFileUrl(
-      Map<String, dynamic> material,
-      ) {
-    final fileUrl =
-        material['fileUrl']?.toString() ?? '';
-
-    return fileUrl.isNotEmpty &&
-        fileUrl != '-';
-  }
-
-  // =========================================================
   // MATERIAL ICON
   // =========================================================
 
@@ -983,24 +1783,29 @@ class _MaterialScreenState extends State<MaterialScreen> {
       ) {
     switch (type.toLowerCase()) {
       case 'pdf':
-        return Icons.picture_as_pdf_rounded;
+        return Icons
+            .picture_as_pdf_rounded;
 
       case 'video':
-        return Icons.play_circle_fill_rounded;
+        return Icons
+            .play_circle_fill_rounded;
 
       case 'ppt':
       case 'powerpoint':
-        return Icons.slideshow_rounded;
+        return Icons
+            .slideshow_rounded;
 
       case 'doc':
       case 'docx':
-        return Icons.description_rounded;
+        return Icons
+            .description_rounded;
 
       case 'link':
         return Icons.link_rounded;
 
       default:
-        return Icons.menu_book_rounded;
+        return Icons
+            .menu_book_rounded;
     }
   }
 }

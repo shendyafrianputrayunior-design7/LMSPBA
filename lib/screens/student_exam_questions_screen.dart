@@ -36,6 +36,18 @@ class _StudentExamQuestionsScreenState
 
   Timer? _timer;
 
+  DocumentReference<Map<String, dynamic>>? get _resultRef {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return null;
+
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('exam_results')
+        .doc(widget.examId);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -49,45 +61,68 @@ class _StudentExamQuestionsScreenState
     super.dispose();
   }
 
+  static int _toInt(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+
+    return int.tryParse((value ?? '').toString()) ?? fallback;
+  }
+
+  int _safeDuration(dynamic value) {
+    final duration = _toInt(value);
+    return duration > 0 ? duration : 1;
+  }
+
   Future<void> _loadQuestions() async {
     try {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        throw Exception('Pengguna belum login.');
+      }
+
+      // Cek apakah ujian sudah pernah dikerjakan.
+      final existingResult = await _resultRef!.get();
+
+      if (existingResult.exists) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ujian ini sudah pernah dikerjakan.'),
+          ),
+        );
+
+        Navigator.pop(context);
+        return;
+      }
+
       final snapshot = await FirebaseFirestore.instance
           .collection('exam_questions')
-          .where(
-        'examId',
-        isEqualTo: widget.examId,
-      )
+          .where('examId', isEqualTo: widget.examId)
           .get();
 
       final questions = snapshot.docs.map((doc) {
-        final data = doc.data();
-
-        return {
+        return <String, dynamic>{
+          ...doc.data(),
           'id': doc.id,
-          ...data,
         };
       }).toList();
 
       questions.sort((a, b) {
-        final aOrder = _toInt(a['order']);
-        final bOrder = _toInt(b['order']);
-
-        return aOrder.compareTo(bOrder);
+        return _toInt(a['order']).compareTo(_toInt(b['order']));
       });
-
-      final duration = _toInt(
-        widget.examData['duration'],
-      );
 
       if (!mounted) return;
 
       setState(() {
         _questions = questions;
-        _remainingSeconds = duration > 0 ? duration * 60 : 0;
+        _remainingSeconds =
+            _safeDuration(widget.examData['duration']) * 60;
         _loading = false;
       });
 
-      if (duration > 0) {
+      if (questions.isNotEmpty) {
         _startTimer();
       }
     } catch (e) {
@@ -99,9 +134,7 @@ class _StudentExamQuestionsScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Gagal memuat soal: $e',
-          ),
+          content: Text('Gagal memuat soal ujian: $e'),
         ),
       );
     }
@@ -113,12 +146,16 @@ class _StudentExamQuestionsScreenState
     _timer = Timer.periodic(
       const Duration(seconds: 1),
           (timer) {
-        if (!mounted) {
+        if (!mounted || _submitting) {
           timer.cancel();
           return;
         }
 
-        if (_remainingSeconds <= 0) {
+        if (_remainingSeconds <= 1) {
+          setState(() {
+            _remainingSeconds = 0;
+          });
+
           timer.cancel();
           _submitExam(autoSubmit: true);
           return;
@@ -131,20 +168,27 @@ class _StudentExamQuestionsScreenState
     );
   }
 
-  static int _toInt(dynamic value) {
-    if (value is int) {
-      return value;
+  Map<String, dynamic> _getOptions(dynamic value) {
+    const keys = ['A', 'B', 'C', 'D'];
+
+    if (value is Map) {
+      final result = <String, dynamic>{};
+
+      value.forEach((key, option) {
+        result[key.toString().trim().toUpperCase()] = option;
+      });
+
+      return result;
     }
 
-    return int.tryParse(
-      (value ?? '0').toString(),
-    ) ??
-        0;
-  }
+    if (value is List) {
+      final result = <String, dynamic>{};
 
-  Map<String, dynamic> _getOptions(dynamic value) {
-    if (value is Map) {
-      return Map<String, dynamic>.from(value);
+      for (var i = 0; i < value.length && i < keys.length; i++) {
+        result[keys[i]] = value[i];
+      }
+
+      return result;
     }
 
     return {};
@@ -165,10 +209,9 @@ class _StudentExamQuestionsScreenState
         '${secs.toString().padLeft(2, '0')}';
   }
 
-  void _selectAnswer(
-      String questionId,
-      String answer,
-      ) {
+  void _selectAnswer(String questionId, String answer) {
+    if (_submitting) return;
+
     setState(() {
       _answers[questionId] = answer;
     });
@@ -187,9 +230,7 @@ class _StudentExamQuestionsScreenState
   }
 
   void _previousQuestion() {
-    if (_currentIndex <= 0) {
-      return;
-    }
+    if (_currentIndex <= 0) return;
 
     _pageController.previousPage(
       duration: const Duration(milliseconds: 250),
@@ -198,11 +239,13 @@ class _StudentExamQuestionsScreenState
   }
 
   Future<void> _showSubmitConfirmation() async {
+    if (_submitting) return;
+
     final unanswered = _questions.length - _answers.length;
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Kumpulkan Ujian?'),
           content: Text(
@@ -214,15 +257,11 @@ class _StudentExamQuestionsScreenState
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(context, false);
-              },
+              onPressed: () => Navigator.pop(dialogContext, false),
               child: const Text('Kembali'),
             ),
             FilledButton(
-              onPressed: () {
-                Navigator.pop(context, true);
-              },
+              onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Kumpulkan'),
             ),
           ],
@@ -235,83 +274,74 @@ class _StudentExamQuestionsScreenState
     }
   }
 
-  Future<void> _submitExam({
-    bool autoSubmit = false,
-  }) async {
-    if (_submitting) {
+  Future<void> _submitExam({bool autoSubmit = false}) async {
+    if (_submitting) return;
+
+    if (_questions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tidak ada soal untuk dikumpulkan.')),
+      );
       return;
     }
 
-    _submitting = true;
-    _timer?.cancel();
+    setState(() {
+      _submitting = true;
+    });
 
-    if (mounted) {
-      setState(() {});
-    }
+    _timer?.cancel();
 
     try {
       final user = FirebaseAuth.instance.currentUser;
 
       if (user == null) {
-        throw Exception(
-          'Pengguna belum login.',
-        );
+        throw Exception('Pengguna belum login.');
       }
+
+      final resultRef = _resultRef!;
 
       int correctAnswers = 0;
       int totalPoints = 0;
       int earnedPoints = 0;
 
+      // Simpan seluruh soal, termasuk yang tidak dijawab.
       final answerData = <String, String>{};
 
       for (final question in _questions) {
-        final questionId =
-        (question['id'] ?? '').toString();
+        final questionId = (question['id'] ?? '').toString();
 
         final selectedAnswer =
-            _answers[questionId] ?? '';
+        (_answers[questionId] ?? '').trim().toUpperCase();
 
-        final correctAnswer =
-        (question['correctAnswer'] ?? '')
-            .toString()
-            .trim()
-            .toUpperCase();
+        final correctAnswer = (
+            question['correctAnswer'] ?? question['answer'] ?? ''
+        ).toString().trim().toUpperCase();
 
         final points = _toInt(
           question['points'],
+          fallback: 10,
         );
 
         totalPoints += points;
+        answerData[questionId] = selectedAnswer;
 
-        if (selectedAnswer.isNotEmpty) {
-          answerData[questionId] = selectedAnswer;
-        }
-
-        if (selectedAnswer.toUpperCase() ==
-            correctAnswer) {
+        if (selectedAnswer.isNotEmpty &&
+            selectedAnswer == correctAnswer) {
           correctAnswers++;
           earnedPoints += points;
         }
       }
 
-      final score = totalPoints > 0
-          ? (earnedPoints / totalPoints) * 100
-          : 0.0;
+      final int score = totalPoints > 0
+          ? ((earnedPoints / totalPoints) * 100).round()
+          : 0;
 
       final passingScore = _toInt(
         widget.examData['passingScore'],
       );
 
-      final passed = passingScore > 0
-          ? score >= passingScore
-          : true;
+      final passed = score >= passingScore;
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('exam_results')
-          .doc(widget.examId)
-          .set({
+      final resultData = <String, dynamic>{
         'examId': widget.examId,
         'studentId': user.uid,
         'score': score,
@@ -324,7 +354,20 @@ class _StudentExamQuestionsScreenState
         'answers': answerData,
         'submittedAt': FieldValue.serverTimestamp(),
         'autoSubmitted': autoSubmit,
-      });
+      };
+
+      // Transaksi memastikan hasil yang sudah ada tidak ditimpa.
+      await FirebaseFirestore.instance.runTransaction<void>(
+            (transaction) async {
+          final existingResult = await transaction.get(resultRef);
+
+          if (existingResult.exists) {
+            throw Exception('EXAM_ALREADY_SUBMITTED');
+          }
+
+          transaction.set(resultRef, resultData);
+        },
+      );
 
       if (!mounted) return;
 
@@ -334,7 +377,7 @@ class _StudentExamQuestionsScreenState
           builder: (_) => StudentExamResultScreen(
             examId: widget.examId,
             examData: widget.examData,
-            score: score,
+            score: score.toDouble(),
             earnedPoints: earnedPoints,
             totalPoints: totalPoints,
             correctAnswers: correctAnswers,
@@ -345,19 +388,30 @@ class _StudentExamQuestionsScreenState
         ),
       );
     } catch (e) {
-      _submitting = false;
-
       if (!mounted) return;
 
-      setState(() {});
+      final message = e.toString().contains('EXAM_ALREADY_SUBMITTED')
+          ? 'Ujian ini sudah pernah dikumpulkan. Hasil tidak ditimpa.'
+          : 'Gagal mengumpulkan ujian: $e';
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal mengumpulkan ujian: $e',
-          ),
-        ),
+        SnackBar(content: Text(message)),
       );
+
+      // Jika hasil ternyata sudah ada, jangan izinkan mengirim ulang.
+      if (e.toString().contains('EXAM_ALREADY_SUBMITTED')) {
+        Navigator.pop(context);
+        return;
+      }
+
+      setState(() {
+        _submitting = false;
+      });
+
+      // Waktu tetap berhenti jika pengumpulan gagal saat waktu habis.
+      if (_remainingSeconds > 0) {
+        _startTimer();
+      }
     }
   }
 
@@ -365,71 +419,60 @@ class _StudentExamQuestionsScreenState
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_questions.isEmpty) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Ujian'),
-        ),
+        appBar: AppBar(title: const Text('Ujian')),
         body: const Center(
-          child: Text(
-            'Tidak ada soal pada ujian ini.',
-          ),
+          child: Text('Tidak ada soal pada ujian ini.'),
         ),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.examData['title']?.toString() ?? 'Ujian',
-        ),
-        centerTitle: true,
-        automaticallyImplyLeading: false,
-      ),
-      body: Column(
-        children: [
-          _buildTopBar(),
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _questions.length,
-              onPageChanged: (index) {
-                setState(() {
-                  _currentIndex = index;
-                });
-              },
-              itemBuilder: (context, index) {
-                return _buildQuestion(
-                  _questions[index],
-                  index,
-                );
-              },
-            ),
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            widget.examData['title']?.toString() ?? 'Ujian',
           ),
-          _buildBottomNavigation(),
-        ],
+          centerTitle: true,
+          automaticallyImplyLeading: false,
+        ),
+        body: Column(
+          children: [
+            _buildTopBar(),
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _questions.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentIndex = index;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  return _buildQuestion(_questions[index], index);
+                },
+              ),
+            ),
+            _buildBottomNavigation(),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildTopBar() {
-    final progress = (_currentIndex + 1) /
-        _questions.length;
+    final progress = (_currentIndex + 1) / _questions.length;
+    final isUrgent = _remainingSeconds <= 60;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(
-        16,
-        12,
-        16,
-        14,
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
@@ -445,35 +488,27 @@ class _StudentExamQuestionsScreenState
           Row(
             children: [
               Text(
-                'Soal ${_currentIndex + 1} '
-                    'dari ${_questions.length}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
+                'Soal ${_currentIndex + 1} dari ${_questions.length}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
-              if (_remainingSeconds > 0)
-                Row(
-                  children: [
-                    Icon(
-                      Icons.timer_outlined,
-                      size: 19,
-                      color: _remainingSeconds <= 60
-                          ? Colors.red
-                          : null,
+              Row(
+                children: [
+                  Icon(
+                    Icons.timer_outlined,
+                    size: 19,
+                    color: isUrgent ? Colors.red : null,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _formatTime(_remainingSeconds),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isUrgent ? Colors.red : null,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _formatTime(_remainingSeconds),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _remainingSeconds <= 60
-                            ? Colors.red
-                            : null,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -491,20 +526,11 @@ class _StudentExamQuestionsScreenState
       Map<String, dynamic> question,
       int index,
       ) {
-    final questionText =
-    (question['question'] ?? '').toString();
-
-    final options = _getOptions(
-      question['options'],
-    );
-
-    final questionId =
-    (question['id'] ?? '').toString();
-
-    final selectedAnswer =
-    _answers[questionId];
-
-    final optionKeys = ['A', 'B', 'C', 'D'];
+    final questionText = (question['question'] ?? '').toString();
+    final options = _getOptions(question['options']);
+    final questionId = (question['id'] ?? '').toString();
+    final selectedAnswer = _answers[questionId];
+    const optionKeys = ['A', 'B', 'C', 'D'];
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -517,9 +543,7 @@ class _StudentExamQuestionsScreenState
               height: 40,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary,
+                color: Theme.of(context).colorScheme.primary,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -544,108 +568,89 @@ class _StudentExamQuestionsScreenState
           ],
         ),
         const SizedBox(height: 24),
-        ...optionKeys.map(
-              (key) {
-            final optionText =
-            (options[key] ?? '').toString();
+        ...optionKeys.map((key) {
+          final optionText = (options[key] ?? '').toString();
 
-            if (optionText.isEmpty) {
-              return const SizedBox.shrink();
-            }
+          if (optionText.isEmpty) {
+            return const SizedBox.shrink();
+          }
 
-            final selected = selectedAnswer == key;
+          final selected = selectedAnswer == key;
 
-            return Padding(
-              padding: const EdgeInsets.only(
-                bottom: 12,
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: _submitting
-                    ? null
-                    : () {
-                  _selectAnswer(
-                    questionId,
-                    key,
-                  );
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(
-                    milliseconds: 180,
-                  ),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: selected
-                          ? Theme.of(context)
-                          .colorScheme
-                          .primary
-                          : Colors.grey.shade300,
-                      width: selected ? 2 : 1,
-                    ),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: _submitting
+                  ? null
+                  : () => _selectAnswer(questionId, key),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
                     color: selected
-                        ? Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withOpacity(0.08)
-                        : null,
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey.shade300,
+                    width: selected ? 2 : 1,
                   ),
-                  child: Row(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
+                  color: selected
+                      ? Theme.of(context)
+                      .colorScheme
+                      .primary
+                      .withOpacity(0.08)
+                      : null,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: selected
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.grey.shade200,
+                      ),
+                      child: Text(
+                        key,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
                           color: selected
-                              ? Theme.of(context)
-                              .colorScheme
-                              .primary
-                              : Colors.grey.shade200,
+                              ? Colors.white
+                              : Colors.grey.shade700,
                         ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 7),
                         child: Text(
-                          key,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: selected
-                                ? Colors.white
-                                : Colors.grey.shade700,
+                          optionText,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            height: 1.4,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Padding(
-                          padding:
-                          const EdgeInsets.only(top: 7),
-                          child: Text(
-                            optionText,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ],
     );
   }
 
   Widget _buildBottomNavigation() {
     final isFirst = _currentIndex == 0;
-    final isLast =
-        _currentIndex == _questions.length - 1;
+    final isLast = _currentIndex == _questions.length - 1;
 
     return SafeArea(
       top: false,
@@ -666,29 +671,32 @@ class _StudentExamQuestionsScreenState
             if (!isFirst)
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _submitting
-                      ? null
-                      : _previousQuestion,
-                  icon: const Icon(
-                    Icons.arrow_back,
-                  ),
+                  onPressed: _submitting ? null : _previousQuestion,
+                  icon: const Icon(Icons.arrow_back),
                   label: const Text('Sebelumnya'),
                 ),
               ),
-            if (!isFirst && !isLast)
-              const SizedBox(width: 12),
+            if (!isFirst && !isLast) const SizedBox(width: 12),
             Expanded(
               child: FilledButton.icon(
-                onPressed: _submitting
-                    ? null
-                    : _nextQuestion,
-                icon: Icon(
+                onPressed: _submitting ? null : _nextQuestion,
+                icon: _submitting
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                )
+                    : Icon(
                   isLast
                       ? Icons.check_rounded
                       : Icons.arrow_forward,
                 ),
                 label: Text(
-                  isLast
+                  _submitting
+                      ? 'Mengumpulkan...'
+                      : isLast
                       ? 'Kumpulkan'
                       : 'Berikutnya',
                 ),

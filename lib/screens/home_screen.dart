@@ -17,6 +17,7 @@ import 'student_schedule_screen.dart';
 import 'student_attendance_screen.dart';
 import 'student_exams_screen.dart';
 import 'student_discussions_screen.dart';
+import 'student_grades_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -2155,7 +2156,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       backgroundColor: colorScheme.surface,
       showDragHandle: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -2171,19 +2172,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Others',
-                    style:
-                    theme.textTheme.titleLarge?.copyWith(
+                    style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 _buildOtherMenuItem(
+                  icon: Icons.grade_outlined,
+                  title: 'Nilai Akhir',
+                  subtitle: 'Lihat nilai semua mata pelajaran',
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showStudentGrades();
+                  },
+                ),
+                _buildOtherMenuItem(
                   icon: Icons.forum_outlined,
                   title: 'Discussions',
                   subtitle: 'Forum diskusi kelas',
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
                     _showDiscussions();
                   },
                 ),
@@ -2192,6 +2201,19 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  // =========================================================
+  // STUDENT GRADES
+  // =========================================================
+
+  void _showStudentGrades() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const StudentGradesScreen(),
+      ),
     );
   }
 

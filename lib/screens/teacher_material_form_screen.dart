@@ -23,17 +23,15 @@ class TeacherMaterialFormScreen extends StatefulWidget {
 
 class _TeacherMaterialFormScreenState
     extends State<TeacherMaterialFormScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  // ============================================================
-  // CANONICAL TEACHER ID
-  // ============================================================
+  final FirebaseFirestore _firestore =
+      FirebaseFirestore.instance;
 
   static const String _fixedTeacherId = 'teacher_001';
 
   final _formKey = GlobalKey<FormState>();
 
   final _titleController = TextEditingController();
+  final _subjectController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _contentController = TextEditingController();
   final _attachmentUrlController = TextEditingController();
@@ -63,6 +61,14 @@ class _TeacherMaterialFormScreenState
   String? _selectedClassName;
 
   // ============================================================
+  // ORIGINAL DATA
+  // ============================================================
+
+  String? _originalCourseId;
+  String? _originalCourseLessonId;
+  String? _originalTitle;
+
+  // ============================================================
   // VIDEO
   // ============================================================
 
@@ -74,7 +80,8 @@ class _TeacherMaterialFormScreenState
 
   int? _selectedVideoSize;
 
-  static const int _maxVideoSize = 100 * 1024 * 1024;
+  static const int _maxVideoSize =
+      100 * 1024 * 1024;
 
   // ============================================================
   // INIT
@@ -89,9 +96,11 @@ class _TeacherMaterialFormScreenState
   @override
   void dispose() {
     _titleController.dispose();
+    _subjectController.dispose();
     _descriptionController.dispose();
     _contentController.dispose();
     _attachmentUrlController.dispose();
+
     super.dispose();
   }
 
@@ -106,6 +115,9 @@ class _TeacherMaterialFormScreenState
       _titleController.text =
           (data['title'] ?? '').toString();
 
+      _subjectController.text =
+          (data['subject'] ?? '').toString();
+
       _descriptionController.text =
           (data['description'] ?? '').toString();
 
@@ -113,36 +125,42 @@ class _TeacherMaterialFormScreenState
           (data['content'] ?? '').toString();
 
       _attachmentUrlController.text =
-          (
-              data['attachmentUrl'] ??
-                  data['fileUrl'] ??
-                  ''
-          ).toString();
+          (data['attachmentUrl'] ??
+              data['fileUrl'] ??
+              '')
+              .toString();
+
+      // ----------------------------------------------------------
+      // ORIGINAL TITLE
+      // ----------------------------------------------------------
+
+      final oldTitle =
+      (data['title'] ?? '')
+          .toString()
+          .trim();
+
+      _originalTitle =
+      oldTitle.isEmpty ? null : oldTitle;
+
+      // ----------------------------------------------------------
+      // COURSE
+      // ----------------------------------------------------------
 
       final oldCourseId =
-      (data['courseId'] ?? '').toString();
+      (data['courseId'] ?? '')
+          .toString()
+          .trim();
 
       final oldCourseName =
-      (
-          data['courseName'] ??
-              data['courseTitle'] ??
-              ''
-      ).toString();
+      (data['courseName'] ??
+          data['courseTitle'] ??
+          '')
+          .toString();
 
-      final oldClassId =
-      (data['classId'] ?? '').toString();
-
-      final oldClassName =
-      (data['className'] ?? '').toString();
-
-      final oldVideoUrl =
-      (data['videoUrl'] ?? '').toString();
-
-      final oldVideoFileName =
-      (data['videoFileName'] ?? '').toString();
-
-      final oldVideoSize =
-      data['videoSize'];
+      _originalCourseId =
+      oldCourseId.isEmpty
+          ? null
+          : oldCourseId;
 
       if (oldCourseId.isNotEmpty) {
         _selectedCourseId = oldCourseId;
@@ -152,6 +170,19 @@ class _TeacherMaterialFormScreenState
         _selectedCourseName = oldCourseName;
       }
 
+      // ----------------------------------------------------------
+      // CLASS
+      // ----------------------------------------------------------
+
+      final oldClassId =
+      (data['classId'] ?? '')
+          .toString()
+          .trim();
+
+      final oldClassName =
+      (data['className'] ?? '')
+          .toString();
+
       if (oldClassId.isNotEmpty) {
         _selectedClassId = oldClassId;
       }
@@ -160,18 +191,50 @@ class _TeacherMaterialFormScreenState
         _selectedClassName = oldClassName;
       }
 
+      // ----------------------------------------------------------
+      // COURSE LESSON ID
+      // ----------------------------------------------------------
+
+      final oldCourseLessonId =
+      (data['courseLessonId'] ?? '')
+          .toString()
+          .trim();
+
+      _originalCourseLessonId =
+      oldCourseLessonId.isEmpty
+          ? null
+          : oldCourseLessonId;
+
+      // ----------------------------------------------------------
+      // VIDEO DARI MATERIAL
+      // ----------------------------------------------------------
+
+      final oldVideoUrl =
+      (data['videoUrl'] ?? '')
+          .toString()
+          .trim();
+
+      final oldVideoFileName =
+      (data['videoFileName'] ?? '')
+          .toString();
+
+      final oldVideoSize =
+      data['videoSize'];
+
       if (oldVideoUrl.isNotEmpty) {
         _existingVideoUrl = oldVideoUrl;
       }
 
       if (oldVideoFileName.isNotEmpty) {
-        _existingVideoFileName = oldVideoFileName;
+        _existingVideoFileName =
+            oldVideoFileName;
       }
 
       if (oldVideoSize is int) {
         _existingVideoSize = oldVideoSize;
       } else if (oldVideoSize is num) {
-        _existingVideoSize = oldVideoSize.toInt();
+        _existingVideoSize =
+            oldVideoSize.toInt();
       }
     }
 
@@ -179,6 +242,199 @@ class _TeacherMaterialFormScreenState
       _loadTeacherProfile(),
       _loadCourses(),
     ]);
+
+    // ============================================================
+    // PENTING:
+    //
+    // Kalau material tidak punya video tetapi sebenarnya video
+    // masih berada di course_lessons, cari dan hubungkan otomatis.
+    // ============================================================
+
+    if (_isEdit &&
+        _existingVideoUrl == null &&
+        _selectedCourseId != null &&
+        _selectedCourseId!.isNotEmpty) {
+      await _loadLegacyVideo();
+    }
+  }
+
+  // ============================================================
+  // LOAD LEGACY VIDEO
+  //
+  // Mencari video yang sebenarnya sudah ada di course_lessons.
+  // Ini yang memperbaiki kasus:
+  //
+  // materials:
+  //   URL ada
+  //   videoUrl kosong
+  //
+  // course_lessons:
+  //   videoUrl ada
+  //
+  // Keduanya akan dianggap satu materi.
+  // ============================================================
+
+  Future<void> _loadLegacyVideo() async {
+    try {
+      final courseId =
+      (_selectedCourseId ?? '').trim();
+
+      if (courseId.isEmpty) {
+        return;
+      }
+
+      final snapshot = await _firestore
+          .collection('course_lessons')
+          .where(
+        'courseId',
+        isEqualTo: courseId,
+      )
+          .get();
+
+      QueryDocumentSnapshot<
+          Map<String, dynamic>>? matchedLesson;
+
+      // ==========================================================
+      // 1. CARI BERDASARKAN courseLessonId
+      // ==========================================================
+
+      final linkedId =
+      (_originalCourseLessonId ?? '')
+          .trim();
+
+      if (linkedId.isNotEmpty) {
+        for (final doc in snapshot.docs) {
+          if (doc.id == linkedId) {
+            final data = doc.data();
+
+            final videoUrl =
+            (data['videoUrl'] ?? '')
+                .toString()
+                .trim();
+
+            if (videoUrl.isNotEmpty) {
+              matchedLesson = doc;
+              break;
+            }
+          }
+        }
+      }
+
+      // ==========================================================
+      // 2. CARI BERDASARKAN JUDUL
+      // ==========================================================
+
+      if (matchedLesson == null) {
+        final oldTitle =
+        (_originalTitle ?? '')
+            .trim()
+            .toLowerCase();
+
+        if (oldTitle.isNotEmpty) {
+          for (final doc in snapshot.docs) {
+            final data = doc.data();
+
+            final lessonTitle =
+            (data['title'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+
+            final videoUrl =
+            (data['videoUrl'] ?? '')
+                .toString()
+                .trim();
+
+            if (lessonTitle == oldTitle &&
+                videoUrl.isNotEmpty) {
+              matchedLesson = doc;
+              break;
+            }
+          }
+        }
+      }
+
+      // ==========================================================
+      // 3. FALLBACK:
+      // CARI VIDEO TERKAIT COURSE
+      //
+      // Digunakan untuk data lama yang judulnya sudah berubah.
+      // ==========================================================
+
+      if (matchedLesson == null) {
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+
+          final videoUrl =
+          (data['videoUrl'] ?? '')
+              .toString()
+              .trim();
+
+          if (videoUrl.isNotEmpty) {
+            matchedLesson = doc;
+            break;
+          }
+        }
+      }
+
+      if (matchedLesson == null) {
+        return;
+      }
+
+      final lessonData =
+      matchedLesson.data();
+
+      final videoUrl =
+      (lessonData['videoUrl'] ?? '')
+          .toString()
+          .trim();
+
+      if (videoUrl.isEmpty) {
+        return;
+      }
+
+      final fileName =
+      (lessonData['videoFileName'] ?? '')
+          .toString();
+
+      final rawSize =
+      lessonData['videoSize'];
+
+      int videoSize = 0;
+
+      if (rawSize is int) {
+        videoSize = rawSize;
+      } else if (rawSize is num) {
+        videoSize = rawSize.toInt();
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _existingVideoUrl = videoUrl;
+
+        _existingVideoFileName =
+        fileName.isEmpty
+            ? null
+            : fileName;
+
+        _existingVideoSize =
+        videoSize > 0
+            ? videoSize
+            : null;
+
+        _originalCourseLessonId =
+            matchedLesson!.id;
+      });
+
+      debugPrint(
+        'Legacy video ditemukan: ${matchedLesson.id}',
+      );
+    } catch (e) {
+      debugPrint(
+        'Gagal mencari legacy video: $e',
+      );
+    }
   }
 
   // ============================================================
@@ -203,12 +459,12 @@ class _TeacherMaterialFormScreenState
           final data =
           teacherQuery.docs.first.data();
 
-          final name = (
-              data['name'] ??
-                  data['username'] ??
-                  data['displayName'] ??
-                  'Guru'
-          ).toString();
+          final name =
+          (data['name'] ??
+              data['username'] ??
+              data['displayName'] ??
+              'Guru')
+              .toString();
 
           if (name.trim().isNotEmpty) {
             teacherName = name.trim();
@@ -235,7 +491,7 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
-  // LOAD COURSE
+  // LOAD COURSES
   // ============================================================
 
   Future<void> _loadCourses() async {
@@ -248,25 +504,28 @@ class _TeacherMaterialFormScreenState
       )
           .get();
 
-      final courses = snapshot.docs.toList();
+      final courses =
+      snapshot.docs.toList();
 
       courses.sort((a, b) {
         final dataA = a.data();
         final dataB = b.data();
 
-        final nameA = (
-            dataA['title'] ??
-                dataA['courseTitle'] ??
-                dataA['name'] ??
-                ''
-        ).toString().toLowerCase();
+        final nameA =
+        (dataA['title'] ??
+            dataA['courseTitle'] ??
+            dataA['name'] ??
+            '')
+            .toString()
+            .toLowerCase();
 
-        final nameB = (
-            dataB['title'] ??
-                dataB['courseTitle'] ??
-                dataB['name'] ??
-                ''
-        ).toString().toLowerCase();
+        final nameB =
+        (dataB['title'] ??
+            dataB['courseTitle'] ??
+            dataB['name'] ??
+            '')
+            .toString()
+            .toLowerCase();
 
         return nameA.compareTo(nameB);
       });
@@ -279,11 +538,12 @@ class _TeacherMaterialFormScreenState
       });
 
       if (_selectedCourseId != null) {
-        QueryDocumentSnapshot<Map<String, dynamic>>?
-        selectedCourse;
+        QueryDocumentSnapshot<
+            Map<String, dynamic>>? selectedCourse;
 
         for (final course in courses) {
-          if (course.id == _selectedCourseId) {
+          if (course.id ==
+              _selectedCourseId) {
             selectedCourse = course;
             break;
           }
@@ -311,28 +571,32 @@ class _TeacherMaterialFormScreenState
   // ============================================================
 
   void _applyCourseData(
-      QueryDocumentSnapshot<Map<String, dynamic>> course,
+      QueryDocumentSnapshot<
+          Map<String, dynamic>>
+      course,
       ) {
     final data = course.data();
 
-    final courseName = (
-        data['title'] ??
-            data['courseTitle'] ??
-            data['name'] ??
-            ''
-    ).toString();
+    final courseName =
+    (data['title'] ??
+        data['courseTitle'] ??
+        data['name'] ??
+        '')
+        .toString();
 
     String? classId;
     String? className;
 
     final courseClassId =
-    (data['classId'] ?? '').toString();
+    (data['classId'] ?? '')
+        .toString()
+        .trim();
 
-    final courseClassName = (
-        data['className'] ??
-            data['class'] ??
-            ''
-    ).toString();
+    final courseClassName =
+    (data['className'] ??
+        data['class'] ??
+        '')
+        .toString();
 
     if (courseClassId.isNotEmpty) {
       classId = courseClassId;
@@ -366,7 +630,8 @@ class _TeacherMaterialFormScreenState
       _selectedCourseId = course.id;
       _selectedCourseName = courseName;
 
-      if (classId != null && classId.isNotEmpty) {
+      if (classId != null &&
+          classId.isNotEmpty) {
         _selectedClassId = classId;
         _selectedClassName =
             className ?? classId;
@@ -381,7 +646,9 @@ class _TeacherMaterialFormScreenState
   // COURSE CHANGED
   // ============================================================
 
-  void _onCourseChanged(String? courseId) {
+  void _onCourseChanged(
+      String? courseId,
+      ) {
     if (courseId == null) {
       setState(() {
         _selectedCourseId = null;
@@ -393,8 +660,8 @@ class _TeacherMaterialFormScreenState
       return;
     }
 
-    QueryDocumentSnapshot<Map<String, dynamic>>?
-    selectedCourse;
+    QueryDocumentSnapshot<
+        Map<String, dynamic>>? selectedCourse;
 
     for (final course in _courses) {
       if (course.id == courseId) {
@@ -418,7 +685,8 @@ class _TeacherMaterialFormScreenState
     if (_loading) return;
 
     try {
-      final file = await FilePicker.pickFile(
+      final file =
+      await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: [
           'mp4',
@@ -434,7 +702,8 @@ class _TeacherMaterialFormScreenState
 
       final path = file.path;
 
-      if (path == null || path.isEmpty) {
+      if (path == null ||
+          path.isEmpty) {
         _showMessage(
           'File video tidak dapat diakses.',
         );
@@ -450,7 +719,7 @@ class _TeacherMaterialFormScreenState
         return;
       }
 
-      final int fileSize =
+      final fileSize =
       await localFile.length();
 
       if (fileSize > _maxVideoSize) {
@@ -495,9 +764,11 @@ class _TeacherMaterialFormScreenState
       return _existingVideoUrl;
     }
 
-    final path = _selectedVideo!.path;
+    final path =
+        _selectedVideo!.path;
 
-    if (path == null || path.isEmpty) {
+    if (path == null ||
+        path.isEmpty) {
       throw Exception(
         'Path video tidak ditemukan.',
       );
@@ -511,7 +782,7 @@ class _TeacherMaterialFormScreenState
       );
     }
 
-    final int fileSize =
+    final fileSize =
     await file.length();
 
     if (fileSize > _maxVideoSize) {
@@ -521,9 +792,8 @@ class _TeacherMaterialFormScreenState
     }
 
     final videoUrl =
-    await CloudinaryService.uploadLessonVideo(
-      file,
-    );
+    await CloudinaryService
+        .uploadLessonVideo(file);
 
     if (videoUrl == null ||
         videoUrl.isEmpty) {
@@ -551,10 +821,6 @@ class _TeacherMaterialFormScreenState
       'courseId',
       isEqualTo: _selectedCourseId,
     )
-        .where(
-      'teacherId',
-      isEqualTo: _fixedTeacherId,
-    )
         .get();
 
     int maxOrder = 0;
@@ -564,10 +830,9 @@ class _TeacherMaterialFormScreenState
 
       final value = data['order'];
 
-      if (value is int) {
-        if (value > maxOrder) {
-          maxOrder = value;
-        }
+      if (value is int &&
+          value > maxOrder) {
+        maxOrder = value;
       } else if (value is num) {
         final order = value.toInt();
 
@@ -581,10 +846,126 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
-  // SAVE / UPDATE COURSE LESSON VIDEO
+  // FIND EXISTING COURSE LESSON
+  //
+  // PENTING:
+  // Tidak lagi memblokir lesson hanya karena teacherId lama.
+  //
+  // Course sudah diverifikasi milik teacher_001.
+  // Jadi lesson di dalam course tersebut boleh dipakai sebagai
+  // lesson video milik materi ini.
   // ============================================================
 
-  Future<void> _saveCourseLesson({
+  Future<QueryDocumentSnapshot<
+      Map<String, dynamic>>?> _findExistingCourseLesson({
+    String? courseId,
+    String? courseLessonId,
+  }) async {
+    final targetCourseId =
+    (courseId ??
+        _selectedCourseId ??
+        '')
+        .toString()
+        .trim();
+
+    if (targetCourseId.isEmpty) {
+      return null;
+    }
+
+    final snapshot = await _firestore
+        .collection('course_lessons')
+        .where(
+      'courseId',
+      isEqualTo: targetCourseId,
+    )
+        .get();
+
+    // ==========================================================
+    // 1. PRIORITAS ID
+    // ==========================================================
+
+    final targetLessonId =
+    (courseLessonId ?? '')
+        .toString()
+        .trim();
+
+    if (targetLessonId.isNotEmpty) {
+      for (final doc in snapshot.docs) {
+        if (doc.id ==
+            targetLessonId) {
+          final data = doc.data();
+
+          final videoUrl =
+          (data['videoUrl'] ?? '')
+              .toString()
+              .trim();
+
+          if (videoUrl.isNotEmpty) {
+            return doc;
+          }
+        }
+      }
+    }
+
+    // ==========================================================
+    // 2. CARI BERDASARKAN JUDUL
+    // ==========================================================
+
+    final oldTitle =
+    (_originalTitle ?? '')
+        .trim()
+        .toLowerCase();
+
+    if (oldTitle.isNotEmpty) {
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        final lessonTitle =
+        (data['title'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        final videoUrl =
+        (data['videoUrl'] ?? '')
+            .toString()
+            .trim();
+
+        if (lessonTitle == oldTitle &&
+            videoUrl.isNotEmpty) {
+          return doc;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // ============================================================
+  // DELETE COURSE LESSON
+  // ============================================================
+
+  Future<void> _deleteCourseLesson(
+      String lessonId,
+      ) async {
+    final cleanId =
+    lessonId.trim();
+
+    if (cleanId.isEmpty) {
+      return;
+    }
+
+    await _firestore
+        .collection('course_lessons')
+        .doc(cleanId)
+        .delete();
+  }
+
+  // ============================================================
+  // SAVE / UPDATE COURSE LESSON
+  // ============================================================
+
+  Future<String> _saveCourseLesson({
     required String videoUrl,
     required String videoFileName,
     required int videoSize,
@@ -592,66 +973,40 @@ class _TeacherMaterialFormScreenState
   }) async {
     if (_selectedCourseId == null ||
         _selectedCourseId!.isEmpty) {
-      return;
+      throw Exception(
+        'Course belum dipilih.',
+      );
     }
 
-    const teacherId = _fixedTeacherId;
-
-    // ==========================================================
-    // CARI LESSON YANG SUDAH ADA
-    //
-    // Kita hanya filter courseId + teacherId.
-    // Setelah itu pencocokan title dilakukan di Dart agar
-    // tidak bergantung pada composite index tambahan.
-    // ==========================================================
-
-    final existingLessonsSnapshot =
-    await _firestore
-        .collection('course_lessons')
-        .where(
-      'courseId',
-      isEqualTo: _selectedCourseId,
-    )
-        .where(
-      'teacherId',
-      isEqualTo: teacherId,
-    )
-        .get();
-
-    QueryDocumentSnapshot<Map<String, dynamic>>?
-    existingLesson;
-
-    final currentTitle =
-    _titleController.text.trim();
-
-    // Saat edit, coba cari lesson berdasarkan judul.
-    for (final doc in existingLessonsSnapshot.docs) {
-      final data = doc.data();
-
-      final lessonTitle =
-      (data['title'] ?? '').toString().trim();
-
-      if (lessonTitle == currentTitle) {
-        existingLesson = doc;
-        break;
-      }
+    if (_selectedClassId == null ||
+        _selectedClassId!.isEmpty) {
+      throw Exception(
+        'Class belum ditentukan dari course.',
+      );
     }
 
-    // ==========================================================
-    // DATA COURSE LESSON
-    // ==========================================================
+    final lessonData =
+    <String, dynamic>{
+      'teacherId':
+      _fixedTeacherId,
 
-    final lessonData = <String, dynamic>{
-      'teacherId': teacherId,
-      'teacherName': _teacherName,
+      'teacherName':
+      _teacherName,
 
-      'courseId': _selectedCourseId,
-      'courseName': _selectedCourseName ?? '',
+      'courseId':
+      _selectedCourseId,
 
-      'classId': _selectedClassId,
-      'className': _selectedClassName ?? '',
+      'courseName':
+      _selectedCourseName ?? '',
 
-      'title': currentTitle,
+      'classId':
+      _selectedClassId,
+
+      'className':
+      _selectedClassName ?? '',
+
+      'title':
+      _titleController.text.trim(),
 
       'content':
       _contentController.text.trim(),
@@ -659,16 +1014,29 @@ class _TeacherMaterialFormScreenState
       'description':
       _descriptionController.text.trim(),
 
-      'videoUrl': videoUrl,
+      'videoUrl':
+      videoUrl,
 
-      'videoFileName': videoFileName,
+      'videoFileName':
+      videoFileName,
 
-      'videoSize': videoSize,
+      'videoSize':
+      videoSize,
 
-      'duration': 0,
+      'duration':
+      0,
 
-      'updatedAt': now,
+      'updatedAt':
+      now,
     };
+
+    final existingLesson =
+    await _findExistingCourseLesson(
+      courseId:
+      _selectedCourseId,
+      courseLessonId:
+      _originalCourseLessonId,
+    );
 
     // ==========================================================
     // UPDATE LESSON
@@ -678,25 +1046,53 @@ class _TeacherMaterialFormScreenState
       await _firestore
           .collection('course_lessons')
           .doc(existingLesson.id)
-          .update(lessonData);
+          .update(
+        lessonData,
+      );
 
-      return;
+      return existingLesson.id;
     }
 
     // ==========================================================
-    // CREATE LESSON BARU
+    // CREATE LESSON
     // ==========================================================
 
     final nextOrder =
     await _getNextLessonOrder();
 
+    final reference =
     await _firestore
-        .collection('course_lessons')
+        .collection(
+      'course_lessons',
+    )
         .add({
       ...lessonData,
       'order': nextOrder,
       'createdAt': now,
     });
+
+    return reference.id;
+  }
+
+  // ============================================================
+  // MATERIAL TYPE
+  // ============================================================
+
+  String _getMaterialType({
+    required bool hasVideo,
+    required String attachmentUrl,
+  }) {
+    if (hasVideo) {
+      return 'Video';
+    }
+
+    if (attachmentUrl
+        .trim()
+        .isNotEmpty) {
+      return 'Link';
+    }
+
+    return 'Dokumen';
   }
 
   // ============================================================
@@ -704,7 +1100,8 @@ class _TeacherMaterialFormScreenState
   // ============================================================
 
   Future<void> _saveMaterial() async {
-    if (!_formKey.currentState!.validate()) {
+    if (!_formKey.currentState!
+        .validate()) {
       return;
     }
 
@@ -713,7 +1110,6 @@ class _TeacherMaterialFormScreenState
       _showMessage(
         'Silakan pilih course terlebih dahulu.',
       );
-
       return;
     }
 
@@ -722,22 +1118,27 @@ class _TeacherMaterialFormScreenState
       _showMessage(
         'Course yang dipilih belum memiliki Class ID.',
       );
-
       return;
     }
-
-    const String teacherId = _fixedTeacherId;
 
     if (!mounted) return;
 
     setState(() {
       _loading = true;
-      _teacherId = teacherId;
+      _teacherId = _fixedTeacherId;
     });
 
     try {
+      final oldCourseId =
+      (_originalCourseId ?? '')
+          .trim();
+
+      final oldLessonId =
+      (_originalCourseLessonId ?? '')
+          .trim();
+
       // ========================================================
-      // VIDEO
+      // VIDEO AWAL
       // ========================================================
 
       String? videoUrl =
@@ -748,6 +1149,10 @@ class _TeacherMaterialFormScreenState
 
       int? videoSize =
           _existingVideoSize;
+
+      // ========================================================
+      // VIDEO BARU
+      // ========================================================
 
       if (_selectedVideo != null) {
         _showMessage(
@@ -769,7 +1174,8 @@ class _TeacherMaterialFormScreenState
 
           if (path != null &&
               path.isNotEmpty) {
-            final file = File(path);
+            final file =
+            File(path);
 
             if (await file.exists()) {
               videoSize =
@@ -779,26 +1185,138 @@ class _TeacherMaterialFormScreenState
         }
       }
 
+      final hasVideo =
+          videoUrl != null &&
+              videoUrl
+                  .trim()
+                  .isNotEmpty;
+
+      final attachmentUrl =
+      _attachmentUrlController
+          .text
+          .trim();
+
+      final materialType =
+      _getMaterialType(
+        hasVideo: hasVideo,
+        attachmentUrl:
+        attachmentUrl,
+      );
+
       final now =
       Timestamp.now();
 
       // ========================================================
-      // DATA MATERIAL
+      // MATERIAL REFERENCE
+      // ========================================================
+
+      final materialReference =
+      _isEdit
+          ? _firestore
+          .collection(
+        'materials',
+      )
+          .doc(
+        widget.materialId,
+      )
+          : _firestore
+          .collection(
+        'materials',
+      )
+          .doc();
+
+      String courseLessonId =
+          oldLessonId;
+
+      // ========================================================
+      // ADA VIDEO
+      // ========================================================
+
+      if (hasVideo) {
+        _showMessage(
+          'Menyimpan video ke course...',
+        );
+
+        // Jika course berubah, lesson lama dihapus.
+        if (_isEdit &&
+            oldLessonId
+                .isNotEmpty &&
+            oldCourseId
+                .isNotEmpty &&
+            oldCourseId !=
+                _selectedCourseId) {
+          await _deleteCourseLesson(
+            oldLessonId,
+          );
+
+          courseLessonId = '';
+        }
+
+        courseLessonId =
+        await _saveCourseLesson(
+          videoUrl:
+          videoUrl!,
+          videoFileName:
+          videoFileName ?? '',
+          videoSize:
+          videoSize ?? 0,
+          now: now,
+        );
+      }
+
+      // ========================================================
+      // TIDAK ADA VIDEO
+      // ========================================================
+
+      else {
+        if (_isEdit &&
+            oldLessonId.isNotEmpty) {
+          await _deleteCourseLesson(
+            oldLessonId,
+          );
+        }
+
+        courseLessonId = '';
+
+        videoUrl = '';
+        videoFileName = '';
+        videoSize = 0;
+      }
+
+      // ========================================================
+      // MATERIAL DATA
       // ========================================================
 
       final materialData =
       <String, dynamic>{
-        'teacherId': teacherId,
-        'teacherName': _teacherName,
+        'teacherId':
+        _fixedTeacherId,
+
+        'teacherName':
+        _teacherName,
 
         'title':
-        _titleController.text.trim(),
+        _titleController
+            .text
+            .trim(),
+
+        'subject':
+        _subjectController
+            .text
+            .trim(),
 
         'description':
-        _descriptionController.text.trim(),
+        _descriptionController
+            .text
+            .trim(),
 
         'content':
-        _contentController.text.trim(),
+        _contentController
+            .text
+            .trim(),
+
+        'type':
+        materialType,
 
         'courseId':
         _selectedCourseId,
@@ -812,6 +1330,17 @@ class _TeacherMaterialFormScreenState
         'className':
         _selectedClassName ?? '',
 
+        // ======================================================
+        // URL TETAP DISIMPAN
+        // ======================================================
+
+        'attachmentUrl':
+        attachmentUrl,
+
+        // ======================================================
+        // VIDEO SEKARANG JUGA DISIMPAN DI MATERIAL
+        // ======================================================
+
         'videoUrl':
         videoUrl ?? '',
 
@@ -821,51 +1350,30 @@ class _TeacherMaterialFormScreenState
         'videoSize':
         videoSize ?? 0,
 
-        'attachmentUrl':
-        _attachmentUrlController.text.trim(),
+        // ======================================================
+        // RELASI KE COURSE LESSON
+        // ======================================================
+
+        'courseLessonId':
+        courseLessonId,
 
         'updatedAt':
         now,
       };
 
       // ========================================================
-      // SIMPAN MATERIAL
+      // SIMPAN
       // ========================================================
 
       if (_isEdit) {
-        await _firestore
-            .collection('materials')
-            .doc(widget.materialId)
-            .update(materialData);
+        await materialReference.update(
+          materialData,
+        );
       } else {
-        await _firestore
-            .collection('materials')
-            .add({
+        await materialReference.set({
           ...materialData,
           'createdAt': now,
         });
-      }
-
-      // ========================================================
-      // SINKRONKAN VIDEO KE COURSE LESSONS
-      //
-      // HANYA jika memang ada video.
-      // ========================================================
-
-      if (videoUrl != null &&
-          videoUrl.trim().isNotEmpty) {
-        _showMessage(
-          'Menyimpan video ke course...',
-        );
-
-        await _saveCourseLesson(
-          videoUrl: videoUrl,
-          videoFileName:
-          videoFileName ?? '',
-          videoSize:
-          videoSize ?? 0,
-          now: now,
-        );
       }
 
       // ========================================================
@@ -895,13 +1403,16 @@ class _TeacherMaterialFormScreenState
   // MESSAGE
   // ============================================================
 
-  void _showMessage(String message) {
+  void _showMessage(
+      String message,
+      ) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context)
         .hideCurrentSnackBar();
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
       SnackBar(
         content: Text(message),
       ),
@@ -909,11 +1420,14 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
-  // FORMAT FILE SIZE
+  // FILE SIZE
   // ============================================================
 
-  String _formatFileSize(int? bytes) {
-    if (bytes == null || bytes <= 0) {
+  String _formatFileSize(
+      int? bytes,
+      ) {
+    if (bytes == null ||
+        bytes <= 0) {
       return '0 B';
     }
 
@@ -921,11 +1435,13 @@ class _TeacherMaterialFormScreenState
       return '$bytes B';
     }
 
-    if (bytes < 1024 * 1024) {
+    if (bytes <
+        1024 * 1024) {
       return '${(bytes / 1024).toStringAsFixed(1)} KB';
     }
 
-    if (bytes < 1024 * 1024 * 1024) {
+    if (bytes <
+        1024 * 1024 * 1024) {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
 
@@ -944,19 +1460,30 @@ class _TeacherMaterialFormScreenState
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      prefixIcon: Icon(icon),
-      border: OutlineInputBorder(
+      prefixIcon:
+      Icon(icon),
+      border:
+      OutlineInputBorder(
         borderRadius:
-        BorderRadius.circular(12),
+        BorderRadius.circular(
+          12,
+        ),
       ),
-      enabledBorder: OutlineInputBorder(
+      enabledBorder:
+      OutlineInputBorder(
         borderRadius:
-        BorderRadius.circular(12),
+        BorderRadius.circular(
+          12,
+        ),
       ),
-      focusedBorder: OutlineInputBorder(
+      focusedBorder:
+      OutlineInputBorder(
         borderRadius:
-        BorderRadius.circular(12),
-        borderSide: BorderSide(
+        BorderRadius.circular(
+          12,
+        ),
+        borderSide:
+        BorderSide(
           color: Theme.of(context)
               .colorScheme
               .primary,
@@ -973,16 +1500,20 @@ class _TeacherMaterialFormScreenState
   Widget _buildCourseDropdown() {
     if (_loadingData) {
       return InputDecorator(
-        decoration: _inputDecoration(
+        decoration:
+        _inputDecoration(
           label: 'Course',
-          icon: Icons.book_outlined,
+          icon:
+          Icons.book_outlined,
         ),
-        child: const SizedBox(
+        child:
+        const SizedBox(
           height: 24,
           child: Align(
             alignment:
             Alignment.centerLeft,
-            child: SizedBox(
+            child:
+            SizedBox(
               width: 20,
               height: 20,
               child:
@@ -997,43 +1528,56 @@ class _TeacherMaterialFormScreenState
 
     if (_courses.isEmpty) {
       return InputDecorator(
-        decoration: _inputDecoration(
+        decoration:
+        _inputDecoration(
           label: 'Course',
-          icon: Icons.book_outlined,
+          icon:
+          Icons.book_outlined,
         ),
-        child: const Text(
+        child:
+        const Text(
           'Belum ada course yang ditugaskan kepada Anda.',
         ),
       );
     }
 
-    return DropdownButtonFormField<String>(
+    return DropdownButtonFormField<
+        String>(
       initialValue:
       _selectedCourseId,
       isExpanded: true,
-      decoration: _inputDecoration(
+      decoration:
+      _inputDecoration(
         label: 'Course',
-        icon: Icons.book_outlined,
+        icon:
+        Icons.book_outlined,
       ),
-      items: _courses.map((course) {
-        final data = course.data();
+      items:
+      _courses.map(
+            (course) {
+          final data =
+          course.data();
 
-        final name = (
-            data['title'] ??
-                data['courseTitle'] ??
-                data['name'] ??
-                'Tanpa Nama Course'
-        ).toString();
+          final name =
+          (data['title'] ??
+              data[
+              'courseTitle'] ??
+              data['name'] ??
+              'Tanpa Nama Course')
+              .toString();
 
-        return DropdownMenuItem<String>(
-          value: course.id,
-          child: Text(
-            name,
-            overflow:
-            TextOverflow.ellipsis,
-          ),
-        );
-      }).toList(),
+          return DropdownMenuItem<
+              String>(
+            value: course.id,
+            child: Text(
+              name,
+              overflow:
+              TextOverflow
+                  .ellipsis,
+            ),
+          );
+        },
+      ).toList(),
       onChanged:
       _loading
           ? null
@@ -1050,33 +1594,43 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
-  // AUTO CLASS INFO
+  // CLASS INFO
   // ============================================================
 
   Widget _buildClassInfo() {
     final theme =
     Theme.of(context);
 
-    if (_selectedCourseId == null) {
+    if (_selectedCourseId ==
+        null) {
       return Container(
         padding:
-        const EdgeInsets.all(14),
-        decoration: BoxDecoration(
+        const EdgeInsets.all(
+          14,
+        ),
+        decoration:
+        BoxDecoration(
           borderRadius:
-          BorderRadius.circular(12),
-          border: Border.all(
-            color:
-            theme.colorScheme.outline,
+          BorderRadius.circular(
+            12,
+          ),
+          border:
+          Border.all(
+            color: theme
+                .colorScheme
+                .outline,
           ),
         ),
         child: Row(
           children: [
             Icon(
               Icons.groups_outlined,
-              color:
-              theme.colorScheme.outline,
+              color: theme
+                  .colorScheme
+                  .outline,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(
+                width: 12),
             Expanded(
               child: Text(
                 'Pilih course terlebih dahulu.',
@@ -1092,28 +1646,39 @@ class _TeacherMaterialFormScreenState
       );
     }
 
-    if (_selectedClassId == null ||
-        _selectedClassId!.isEmpty) {
+    if (_selectedClassId ==
+        null ||
+        _selectedClassId!
+            .isEmpty) {
       return Container(
         padding:
-        const EdgeInsets.all(14),
-        decoration: BoxDecoration(
+        const EdgeInsets.all(
+          14,
+        ),
+        decoration:
+        BoxDecoration(
           color: theme
               .colorScheme
               .errorContainer,
           borderRadius:
-          BorderRadius.circular(12),
+          BorderRadius.circular(
+            12,
+          ),
         ),
         child: Row(
           crossAxisAlignment:
-          CrossAxisAlignment.start,
+          CrossAxisAlignment
+              .start,
           children: [
             Icon(
-              Icons.warning_amber_rounded,
-              color:
-              theme.colorScheme.error,
+              Icons
+                  .warning_amber_rounded,
+              color: theme
+                  .colorScheme
+                  .error,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(
+                width: 12),
             Expanded(
               child: Text(
                 'Course ini belum memiliki Class ID. '
@@ -1132,14 +1697,20 @@ class _TeacherMaterialFormScreenState
 
     return Container(
       padding:
-      const EdgeInsets.all(14),
-      decoration: BoxDecoration(
+      const EdgeInsets.all(
+        14,
+      ),
+      decoration:
+      BoxDecoration(
         color: theme
             .colorScheme
             .surfaceContainerHighest,
         borderRadius:
-        BorderRadius.circular(12),
-        border: Border.all(
+        BorderRadius.circular(
+          12,
+        ),
+        border:
+        Border.all(
           color: theme
               .colorScheme
               .outlineVariant,
@@ -1150,24 +1721,30 @@ class _TeacherMaterialFormScreenState
           Container(
             width: 42,
             height: 42,
-            decoration: BoxDecoration(
+            decoration:
+            BoxDecoration(
               color: theme
                   .colorScheme
                   .primaryContainer,
               borderRadius:
-              BorderRadius.circular(10),
+              BorderRadius.circular(
+                10,
+              ),
             ),
             child: Icon(
               Icons.groups_outlined,
-              color:
-              theme.colorScheme.primary,
+              color: theme
+                  .colorScheme
+                  .primary,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(
+              width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment:
-              CrossAxisAlignment.start,
+              CrossAxisAlignment
+                  .start,
               children: [
                 Text(
                   'Kelas',
@@ -1178,7 +1755,8 @@ class _TeacherMaterialFormScreenState
                         .onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(
+                    height: 3),
                 Text(
                   _selectedClassName ??
                       _selectedClassId!,
@@ -1188,7 +1766,8 @@ class _TeacherMaterialFormScreenState
                     FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(
+                    height: 2),
                 Text(
                   'Class ID: $_selectedClassId',
                   style: TextStyle(
@@ -1203,8 +1782,9 @@ class _TeacherMaterialFormScreenState
           ),
           Icon(
             Icons.check_circle,
-            color:
-            theme.colorScheme.primary,
+            color: theme
+                .colorScheme
+                .primary,
           ),
         ],
       ),
@@ -1212,7 +1792,7 @@ class _TeacherMaterialFormScreenState
   }
 
   // ============================================================
-  // VIDEO PICKER UI
+  // VIDEO SECTION
   // ============================================================
 
   Widget _buildVideoSection() {
@@ -1224,15 +1804,22 @@ class _TeacherMaterialFormScreenState
 
     final hasExistingVideo =
         _existingVideoUrl != null &&
-            _existingVideoUrl!.isNotEmpty;
+            _existingVideoUrl!
+                .isNotEmpty;
 
     return Container(
       padding:
-      const EdgeInsets.all(16),
-      decoration: BoxDecoration(
+      const EdgeInsets.all(
+        16,
+      ),
+      decoration:
+      BoxDecoration(
         borderRadius:
-        BorderRadius.circular(16),
-        border: Border.all(
+        BorderRadius.circular(
+          16,
+        ),
+        border:
+        Border.all(
           color: theme
               .colorScheme
               .outlineVariant,
@@ -1240,16 +1827,20 @@ class _TeacherMaterialFormScreenState
       ),
       child: Column(
         crossAxisAlignment:
-        CrossAxisAlignment.start,
+        CrossAxisAlignment
+            .start,
         children: [
           Row(
             children: [
               Icon(
-                Icons.video_library_outlined,
-                color:
-                theme.colorScheme.primary,
+                Icons
+                    .video_library_outlined,
+                color: theme
+                    .colorScheme
+                    .primary,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(
+                  width: 10),
               const Expanded(
                 child: Text(
                   'Video Materi',
@@ -1263,7 +1854,8 @@ class _TeacherMaterialFormScreenState
             ],
           ),
 
-          const SizedBox(height: 8),
+          const SizedBox(
+              height: 8),
 
           Text(
             'Tambahkan video pembelajaran untuk ditampilkan pada Lesson.',
@@ -1275,45 +1867,58 @@ class _TeacherMaterialFormScreenState
             ),
           ),
 
-          const SizedBox(height: 14),
+          const SizedBox(
+              height: 14),
 
           if (hasNewVideo)
             Container(
               padding:
-              const EdgeInsets.all(12),
-              decoration: BoxDecoration(
+              const EdgeInsets.all(
+                12,
+              ),
+              decoration:
+              BoxDecoration(
                 color: theme
                     .colorScheme
                     .primaryContainer,
                 borderRadius:
-                BorderRadius.circular(12),
+                BorderRadius.circular(
+                  12,
+                ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    Icons.video_file_outlined,
+                    Icons
+                        .video_file_outlined,
                     color: theme
                         .colorScheme
                         .primary,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(
+                      width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      CrossAxisAlignment
+                          .start,
                       children: [
                         Text(
-                          _selectedVideo!.name,
+                          _selectedVideo!
+                              .name,
                           maxLines: 2,
                           overflow:
-                          TextOverflow.ellipsis,
+                          TextOverflow
+                              .ellipsis,
                           style:
                           const TextStyle(
                             fontWeight:
-                            FontWeight.w600,
+                            FontWeight
+                                .w600,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(
+                            height: 4),
                         Text(
                           _formatFileSize(
                             _selectedVideoSize,
@@ -1332,7 +1937,9 @@ class _TeacherMaterialFormScreenState
                     onPressed:
                     _removeSelectedVideo,
                     icon:
-                    const Icon(Icons.close),
+                    const Icon(
+                      Icons.close,
+                    ),
                     tooltip:
                     'Hapus pilihan',
                   ),
@@ -1342,27 +1949,35 @@ class _TeacherMaterialFormScreenState
           else if (hasExistingVideo)
             Container(
               padding:
-              const EdgeInsets.all(12),
-              decoration: BoxDecoration(
+              const EdgeInsets.all(
+                12,
+              ),
+              decoration:
+              BoxDecoration(
                 color: theme
                     .colorScheme
                     .surfaceContainerHighest,
                 borderRadius:
-                BorderRadius.circular(12),
+                BorderRadius.circular(
+                  12,
+                ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    Icons.video_file_outlined,
+                    Icons
+                        .video_file_outlined,
                     color: theme
                         .colorScheme
                         .primary,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(
+                      width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      CrossAxisAlignment
+                          .start,
                       children: [
                         Text(
                           _existingVideoFileName
@@ -1372,14 +1987,17 @@ class _TeacherMaterialFormScreenState
                               : 'Video materi tersedia',
                           maxLines: 2,
                           overflow:
-                          TextOverflow.ellipsis,
+                          TextOverflow
+                              .ellipsis,
                           style:
                           const TextStyle(
                             fontWeight:
-                            FontWeight.w600,
+                            FontWeight
+                                .w600,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(
+                            height: 4),
                         Text(
                           _formatFileSize(
                             _existingVideoSize,
@@ -1391,12 +2009,24 @@ class _TeacherMaterialFormScreenState
                                 .onSurfaceVariant,
                           ),
                         ),
+                        const SizedBox(
+                            height: 4),
+                        Text(
+                          'Video sudah terhubung dengan materi ini.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: theme
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                   const Icon(
                     Icons.check_circle,
-                    color: Colors.green,
+                    color:
+                    Colors.green,
                   ),
                 ],
               ),
@@ -1404,23 +2034,30 @@ class _TeacherMaterialFormScreenState
           else
             Container(
               padding:
-              const EdgeInsets.all(14),
-              decoration: BoxDecoration(
+              const EdgeInsets.all(
+                14,
+              ),
+              decoration:
+              BoxDecoration(
                 color: theme
                     .colorScheme
                     .surfaceContainerHighest,
                 borderRadius:
-                BorderRadius.circular(12),
+                BorderRadius.circular(
+                  12,
+                ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    Icons.video_library_outlined,
+                    Icons
+                        .video_library_outlined,
                     color: theme
                         .colorScheme
                         .onSurfaceVariant,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(
+                      width: 10),
                   Expanded(
                     child: Text(
                       'Belum ada video materi.',
@@ -1435,10 +2072,12 @@ class _TeacherMaterialFormScreenState
               ),
             ),
 
-          const SizedBox(height: 14),
+          const SizedBox(
+              height: 14),
 
           SizedBox(
-            width: double.infinity,
+            width:
+            double.infinity,
             child:
             OutlinedButton.icon(
               onPressed:
@@ -1460,7 +2099,8 @@ class _TeacherMaterialFormScreenState
             ),
           ),
 
-          const SizedBox(height: 8),
+          const SizedBox(
+              height: 8),
 
           Text(
             'Format: MP4, MOV, M4V, WEBM • Maksimal 100 MB',
@@ -1481,7 +2121,9 @@ class _TeacherMaterialFormScreenState
   // ============================================================
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+      BuildContext context,
+      ) {
     final theme =
     Theme.of(context);
 
@@ -1491,7 +2133,8 @@ class _TeacherMaterialFormScreenState
           _isEdit
               ? 'Edit Materi'
               : 'Tambah Materi',
-          style: const TextStyle(
+          style:
+          const TextStyle(
             fontWeight:
             FontWeight.bold,
           ),
@@ -1506,7 +2149,9 @@ class _TeacherMaterialFormScreenState
         key: _formKey,
         child: ListView(
           padding:
-          const EdgeInsets.all(16),
+          const EdgeInsets.all(
+            16,
+          ),
           children: [
             // ==================================================
             // HEADER
@@ -1514,14 +2159,18 @@ class _TeacherMaterialFormScreenState
 
             Container(
               padding:
-              const EdgeInsets.all(16),
+              const EdgeInsets.all(
+                16,
+              ),
               decoration:
               BoxDecoration(
                 color: theme
                     .colorScheme
                     .primaryContainer,
                 borderRadius:
-                BorderRadius.circular(16),
+                BorderRadius.circular(
+                  16,
+                ),
               ),
               child: Row(
                 children: [
@@ -1538,8 +2187,7 @@ class _TeacherMaterialFormScreenState
                     ),
                   ),
                   const SizedBox(
-                    width: 12,
-                  ),
+                      width: 12),
                   Expanded(
                     child: Text(
                       _isEdit
@@ -1548,7 +2196,8 @@ class _TeacherMaterialFormScreenState
                       style:
                       const TextStyle(
                         fontWeight:
-                        FontWeight.w600,
+                        FontWeight
+                            .w600,
                       ),
                     ),
                   ),
@@ -1556,7 +2205,8 @@ class _TeacherMaterialFormScreenState
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(
+                height: 20),
 
             // ==================================================
             // JUDUL
@@ -1574,8 +2224,10 @@ class _TeacherMaterialFormScreenState
                 hint:
                 'Contoh: Dasar Pemrograman',
               ),
-              validator: (value) {
-                if (value == null ||
+              validator:
+                  (value) {
+                if (value ==
+                    null ||
                     value
                         .trim()
                         .isEmpty) {
@@ -1586,7 +2238,41 @@ class _TeacherMaterialFormScreenState
               },
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(
+                height: 16),
+
+            // ==================================================
+            // SUBJECT
+            // ==================================================
+
+            TextFormField(
+              controller:
+              _subjectController,
+              decoration:
+              _inputDecoration(
+                label:
+                'Mata Pelajaran',
+                icon: Icons
+                    .subject_outlined,
+                hint:
+                'Contoh: Pemrograman',
+              ),
+              validator:
+                  (value) {
+                if (value ==
+                    null ||
+                    value
+                        .trim()
+                        .isEmpty) {
+                  return 'Mata pelajaran wajib diisi';
+                }
+
+                return null;
+              },
+            ),
+
+            const SizedBox(
+                height: 16),
 
             // ==================================================
             // DESKRIPSI
@@ -1607,10 +2293,11 @@ class _TeacherMaterialFormScreenState
               ),
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(
+                height: 16),
 
             // ==================================================
-            // ISI MATERI
+            // ISI
             // ==================================================
 
             TextFormField(
@@ -1627,8 +2314,10 @@ class _TeacherMaterialFormScreenState
                 hint:
                 'Masukkan isi materi pembelajaran',
               ),
-              validator: (value) {
-                if (value == null ||
+              validator:
+                  (value) {
+                if (value ==
+                    null ||
                     value
                         .trim()
                         .isEmpty) {
@@ -1639,7 +2328,8 @@ class _TeacherMaterialFormScreenState
               },
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(
+                height: 16),
 
             // ==================================================
             // COURSE
@@ -1647,15 +2337,17 @@ class _TeacherMaterialFormScreenState
 
             _buildCourseDropdown(),
 
-            const SizedBox(height: 16),
+            const SizedBox(
+                height: 16),
 
             // ==================================================
-            // KELAS
+            // CLASS
             // ==================================================
 
             _buildClassInfo(),
 
-            const SizedBox(height: 16),
+            const SizedBox(
+                height: 16),
 
             // ==================================================
             // VIDEO
@@ -1663,7 +2355,8 @@ class _TeacherMaterialFormScreenState
 
             _buildVideoSection(),
 
-            const SizedBox(height: 16),
+            const SizedBox(
+                height: 16),
 
             // ==================================================
             // URL LAMPIRAN
@@ -1678,14 +2371,15 @@ class _TeacherMaterialFormScreenState
               _inputDecoration(
                 label:
                 'URL Lampiran',
-                icon:
-                Icons.attach_file,
+                icon: Icons
+                    .attach_file,
                 hint:
                 'https://...',
               ),
             ),
 
-            const SizedBox(height: 28),
+            const SizedBox(
+                height: 28),
 
             // ==================================================
             // SAVE
@@ -1705,13 +2399,16 @@ class _TeacherMaterialFormScreenState
                   height: 20,
                   child:
                   CircularProgressIndicator(
-                    strokeWidth: 2,
+                    strokeWidth:
+                    2,
                   ),
                 )
                     : Icon(
                   _isEdit
-                      ? Icons.save
-                      : Icons.add,
+                      ? Icons
+                      .save
+                      : Icons
+                      .add,
                 ),
                 label: Text(
                   _loading
@@ -1723,7 +2420,8 @@ class _TeacherMaterialFormScreenState
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(
+                height: 20),
           ],
         ),
       ),

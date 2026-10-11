@@ -17,10 +17,12 @@ class AssignmentsScreen extends StatefulWidget {
   });
 
   @override
-  State<AssignmentsScreen> createState() => _AssignmentsScreenState();
+  State<AssignmentsScreen> createState() =>
+      _AssignmentsScreenState();
 }
 
-class _AssignmentsScreenState extends State<AssignmentsScreen> {
+class _AssignmentsScreenState
+    extends State<AssignmentsScreen> {
   final FirebaseFirestore _firestore =
       FirebaseFirestore.instance;
 
@@ -418,6 +420,58 @@ class _AssignmentDetailScreenState
   int get points =>
       _parseInt(widget.assignment['points']);
 
+  // ==========================================================
+  // DOKUMEN TUGAS DARI GURU
+  // ==========================================================
+
+  String get teacherDocumentUrl {
+    final attachmentUrl =
+    (widget.assignment['attachmentUrl'] ??
+        '')
+        .toString()
+        .trim();
+
+    if (attachmentUrl.isNotEmpty) {
+      return attachmentUrl;
+    }
+
+    final fileUrl =
+    (widget.assignment['fileUrl'] ?? '')
+        .toString()
+        .trim();
+
+    return fileUrl;
+  }
+
+  String get teacherDocumentFileName {
+    final fileName =
+    (widget.assignment['fileName'] ??
+        '')
+        .toString()
+        .trim();
+
+    if (fileName.isNotEmpty) {
+      return fileName;
+    }
+
+    final attachmentName =
+    (widget.assignment[
+    'attachmentFileName'] ??
+        '')
+        .toString()
+        .trim();
+
+    if (attachmentName.isNotEmpty) {
+      return attachmentName;
+    }
+
+    return 'Dokumen tugas';
+  }
+
+  bool get hasTeacherDocument {
+    return teacherDocumentUrl.isNotEmpty;
+  }
+
   DateTime? get dueDate {
     final value =
     widget.assignment['dueDate'];
@@ -497,14 +551,28 @@ class _AssignmentDetailScreenState
             children: [
               _buildHeaderCard(),
               const SizedBox(height: 14),
+
               _buildInformationCard(),
               const SizedBox(height: 14),
+
               _buildDescriptionCard(),
+
               if (instructions.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 _buildInstructionsCard(),
               ],
+
+              // ==================================================
+              // DOKUMEN DARI GURU
+              // ==================================================
+
+              if (hasTeacherDocument) ...[
+                const SizedBox(height: 14),
+                _buildTeacherDocumentCard(),
+              ],
+
               const SizedBox(height: 14),
+
               _buildSubmissionCard(
                 submission: submission,
               ),
@@ -751,6 +819,132 @@ class _AssignmentDetailScreenState
   }
 
   // ==========================================================
+  // DOKUMEN TUGAS GURU
+  // ==========================================================
+
+  Widget _buildTeacherDocumentCard() {
+    final fileName =
+        teacherDocumentFileName;
+
+    return _SectionCard(
+      title: 'Dokumen Tugas',
+      icon: Icons.attach_file_rounded,
+      child: Container(
+        width: double.infinity,
+        padding:
+        const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF6FF),
+          borderRadius:
+          BorderRadius.circular(14),
+          border: Border.all(
+            color: const Color(0xFFBFDBFE),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius:
+                    BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    _getFileIcon(fileName),
+                    color:
+                    const Color(0xFF2563EB),
+                    size: 23,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'File dari Guru',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color:
+                          Color(0xFF64748B),
+                          fontWeight:
+                          FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        fileName,
+                        maxLines: 2,
+                        overflow:
+                        TextOverflow.ellipsis,
+                        style:
+                        const TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                          FontWeight.w700,
+                          color:
+                          Color(0xFF111827),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed:
+                    () => _openFile(
+                  teacherDocumentUrl,
+                ),
+                icon: const Icon(
+                  Icons.open_in_new,
+                  size: 18,
+                ),
+                label: const Text(
+                  'Lihat Dokumen Tugas',
+                ),
+                style:
+                ElevatedButton.styleFrom(
+                  backgroundColor:
+                  const Color(0xFF2563EB),
+                  foregroundColor:
+                  Colors.white,
+                  padding:
+                  const EdgeInsets.symmetric(
+                    vertical: 13,
+                  ),
+                  elevation: 0,
+                  shape:
+                  RoundedRectangleBorder(
+                    borderRadius:
+                    BorderRadius.circular(
+                      11,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==========================================================
   // SUBMISSION
   // ==========================================================
 
@@ -800,11 +994,15 @@ class _AssignmentDetailScreenState
             )
           else
             _buildNotSubmitted(),
+
           const SizedBox(height: 16),
+
           if (_selectedFile != null)
             _buildSelectedFile(),
+
           if (_selectedFile != null)
             const SizedBox(height: 12),
+
           if (!isOverdue) ...[
             SizedBox(
               width: double.infinity,
@@ -838,6 +1036,7 @@ class _AssignmentDetailScreenState
                 ),
               ),
             ),
+
             if (_selectedFile != null) ...[
               const SizedBox(height: 10),
               SizedBox(
@@ -926,6 +1125,7 @@ class _AssignmentDetailScreenState
                 ],
               ),
             ),
+
           if (submitted &&
               !isOverdue) ...[
             const SizedBox(height: 12),
@@ -1632,7 +1832,8 @@ class _AssignmentDetailScreenState
       final uri =
       Uri.tryParse(url);
 
-      if (uri == null) {
+      if (uri == null ||
+          !uri.hasScheme) {
         _showSnackBar(
           'URL file tidak valid.',
           isError: true,
@@ -1661,6 +1862,49 @@ class _AssignmentDetailScreenState
         isError: true,
       );
     }
+  }
+
+  // ==========================================================
+  // FILE ICON
+  // ==========================================================
+
+  IconData _getFileIcon(
+      String fileName,
+      ) {
+    final name =
+    fileName.toLowerCase();
+
+    if (name.endsWith('.pdf')) {
+      return Icons.picture_as_pdf_rounded;
+    }
+
+    if (name.endsWith('.doc') ||
+        name.endsWith('.docx')) {
+      return Icons.description_rounded;
+    }
+
+    if (name.endsWith('.ppt') ||
+        name.endsWith('.pptx')) {
+      return Icons.slideshow_rounded;
+    }
+
+    if (name.endsWith('.xls') ||
+        name.endsWith('.xlsx')) {
+      return Icons.table_chart_rounded;
+    }
+
+    if (name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png')) {
+      return Icons.image_rounded;
+    }
+
+    if (name.endsWith('.zip') ||
+        name.endsWith('.rar')) {
+      return Icons.folder_zip_rounded;
+    }
+
+    return Icons.insert_drive_file_rounded;
   }
 
   // ==========================================================

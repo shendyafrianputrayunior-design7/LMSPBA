@@ -35,14 +35,14 @@ class StudentExamResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title =
-    (examData['title'] ?? 'Ujian').toString();
+    final title = (examData['title'] ?? 'Ujian').toString();
 
-    final subject =
-    (examData['subject'] ??
-        examData['courseName'] ??
-        '-')
-        .toString();
+    final subject = (
+        examData['subject'] ??
+            examData['courseName'] ??
+            examData['courseTitle'] ??
+            '-'
+    ).toString();
 
     return PopScope(
       canPop: false,
@@ -106,7 +106,7 @@ class StudentExamResultScreen extends StatelessWidget {
                 Expanded(
                   child: _StatCard(
                     icon: Icons.check_circle_outline,
-                    title: 'Benar',
+                    title: 'Jawaban Benar',
                     value: '$correctAnswers',
                   ),
                 ),
@@ -121,15 +121,14 @@ class StudentExamResultScreen extends StatelessWidget {
                   child: _StatCard(
                     icon: Icons.stars_outlined,
                     title: 'Poin',
-                    value:
-                    '$earnedPoints/$totalPoints',
+                    value: '$earnedPoints/$totalPoints',
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: _StatCard(
                     icon: Icons.emoji_events_outlined,
-                    title: 'Kelulusan',
+                    title: 'Nilai Kelulusan',
                     value: passingScore > 0
                         ? '$passingScore'
                         : '-',
@@ -154,21 +153,21 @@ class StudentExamResultScreen extends StatelessWidget {
                 ),
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     passed
                         ? Icons.check_circle_rounded
                         : Icons.cancel_rounded,
                     size: 36,
-                    color: passed
-                        ? Colors.green
-                        : Colors.red,
+                    color: passed ? Colors.green : Colors.red,
                   ),
+
                   const SizedBox(width: 14),
+
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           passed
@@ -182,7 +181,9 @@ class StudentExamResultScreen extends StatelessWidget {
                                 : Colors.red,
                           ),
                         ),
+
                         const SizedBox(height: 4),
+
                         Text(
                           passed
                               ? 'Nilai kamu memenuhi nilai kelulusan ujian.'
@@ -208,38 +209,17 @@ class StudentExamResultScreen extends StatelessWidget {
               height: 52,
               child: FilledButton.icon(
                 onPressed: () {
-                  Navigator.popUntil(
-                    context,
+                  Navigator.of(context).popUntil(
                         (route) => route.isFirst,
                   );
                 },
-                icon: const Icon(
-                  Icons.home_outlined,
-                ),
+                icon: const Icon(Icons.home_outlined),
                 label: const Text(
                   'Kembali ke Beranda',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                icon: const Icon(
-                  Icons.arrow_back,
-                ),
-                label: const Text(
-                  'Kembali',
                 ),
               ),
             ),
@@ -252,8 +232,7 @@ class StudentExamResultScreen extends StatelessWidget {
   }
 
   Widget _buildResultHeader(BuildContext context) {
-    final primaryColor =
-        Theme.of(context).colorScheme.primary;
+    final primaryColor = Theme.of(context).colorScheme.primary;
 
     return Container(
       width: double.infinity,
@@ -282,19 +261,30 @@ class StudentExamResultScreen extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 34,
                   fontWeight: FontWeight.bold,
-                  color: passed
-                      ? Colors.green
-                      : Colors.red,
+                  color: passed ? Colors.green : Colors.red,
                 ),
               ),
             ),
           ),
+
           const SizedBox(height: 14),
+
           const Text(
             'Nilai Akhir',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w500,
+            ),
+          ),
+
+          const SizedBox(height: 4),
+
+          Text(
+            passed ? 'LULUS' : 'BELUM LULUS',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: passed ? Colors.green : Colors.red,
             ),
           ),
         ],
@@ -331,7 +321,9 @@ class _StatCard extends StatelessWidget {
             icon,
             color: Theme.of(context).colorScheme.primary,
           ),
+
           const SizedBox(height: 8),
+
           Text(
             value,
             style: const TextStyle(
@@ -339,7 +331,9 @@ class _StatCard extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
+
           const SizedBox(height: 3),
+
           Text(
             title,
             textAlign: TextAlign.center,

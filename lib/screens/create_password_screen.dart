@@ -1,3 +1,4 @@
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -13,36 +14,50 @@ class _CreatePasswordScreenState
     extends State<CreatePasswordScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  final _currentPasswordController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
+  bool _obscureCurrentPassword = true;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
 
+  bool get _hasPassword {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return user?.providerData.any(
+          (provider) => provider.providerId == 'password',
+    ) ??
+        false;
+  }
+
   @override
   void dispose() {
+    _currentPasswordController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
   }
 
   Future<void> _createPassword() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (_isLoading) return;
+
+    if (!_formKey.currentState!.validate()) return;
 
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       _showMessage(
-        'User tidak ditemukan. Silakan login kembali.',
+        'Pengguna tidak ditemukan. Silakan login kembali.',
         isError: true,
       );
       return;
     }
 
-    if (user.email == null || user.email!.isEmpty) {
+    final email = user.email;
+
+    if (email == null || email.isEmpty) {
       _showMessage(
         'Akun ini tidak memiliki email.',
         isError: true,
@@ -50,24 +65,44 @@ class _CreatePasswordScreenState
       return;
     }
 
+    final hasPassword = _hasPassword;
+
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final credential = EmailAuthProvider.credential(
-        email: user.email!,
-        password: _passwordController.text.trim(),
-      );
+      if (hasPassword) {
+        // Verifikasi password lama terlebih dahulu.
+        final credential = EmailAuthProvider.credential(
+          email: email,
+          password: _currentPasswordController.text,
+        );
 
-      await user.linkWithCredential(credential);
+        await user.reauthenticateWithCredential(credential);
 
-      await user.reload();
+        // Password lama benar, perbarui dengan password baru.
+        await user.updatePassword(
+          _passwordController.text,
+        );
+      } else {
+        // Tambahkan provider email-password untuk akun Google.
+        final credential = EmailAuthProvider.credential(
+          email: email,
+          password: _passwordController.text,
+        );
+
+        await user.linkWithCredential(credential);
+      }
+
+      await FirebaseAuth.instance.currentUser?.reload();
 
       if (!mounted) return;
 
       _showMessage(
-        'Password berhasil dibuat.',
+        hasPassword
+            ? 'Password berhasil diperbarui.'
+            : 'Password berhasil dibuat.',
       );
 
       await Future.delayed(
@@ -83,19 +118,10 @@ class _CreatePasswordScreenState
       String message;
 
       switch (e.code) {
-        case 'provider-already-linked':
+        case 'wrong-password':
+        case 'invalid-credential':
           message =
-          'Password untuk akun ini sudah terhubung.';
-          break;
-
-        case 'credential-already-in-use':
-          message =
-          'Email tersebut sudah digunakan oleh akun lain.';
-          break;
-
-        case 'email-already-in-use':
-          message =
-          'Email tersebut sudah digunakan oleh akun lain.';
+          'Password lama salah. Silakan periksa kembali.';
           break;
 
         case 'weak-password':
@@ -105,7 +131,18 @@ class _CreatePasswordScreenState
 
         case 'requires-recent-login':
           message =
-          'Sesi login sudah terlalu lama. Silakan login kembali dengan Google lalu coba lagi.';
+          'Sesi login sudah terlalu lama. Silakan login ulang, lalu coba kembali.';
+          break;
+
+        case 'provider-already-linked':
+          message =
+          'Password sudah terhubung dengan akun ini. Buka kembali halaman ini.';
+          break;
+
+        case 'credential-already-in-use':
+        case 'email-already-in-use':
+          message =
+          'Email tersebut sudah digunakan oleh akun lain.';
           break;
 
         case 'network-request-failed':
@@ -113,16 +150,23 @@ class _CreatePasswordScreenState
           'Tidak ada koneksi internet. Silakan coba lagi.';
           break;
 
+        case 'too-many-requests':
+          message =
+          'Terlalu banyak percobaan. Silakan coba lagi nanti.';
+          break;
+
+        case 'user-mismatch':
+          message =
+          'Kredensial tidak sesuai dengan akun yang sedang digunakan.';
+          break;
+
         default:
           message =
-              e.message ?? 'Gagal membuat password.';
+              e.message ?? 'Gagal menyimpan password.';
       }
 
-      _showMessage(
-        message,
-        isError: true,
-      );
-    } catch (e) {
+      _showMessage(message, isError: true);
+    } catch (_) {
       if (!mounted) return;
 
       _showMessage(
@@ -146,7 +190,64 @@ class _CreatePasswordScreenState
       SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
+        backgroundColor: isError
+            ? Theme.of(context).colorScheme.error
+            : null,
       ),
+    );
+  }
+
+  Widget _buildPasswordField({
+    required String label,
+    required String hint,
+    required TextEditingController controller,
+    required bool obscureText,
+    required VoidCallback onToggleVisibility,
+    required String? Function(String?) validator,
+    TextInputAction textInputAction = TextInputAction.next,
+    ValueChanged<String>? onFieldSubmitted,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          obscureText: obscureText,
+          textInputAction: textInputAction,
+          enabled: !_isLoading,
+          autocorrect: false,
+          enableSuggestions: false,
+          onFieldSubmitted: onFieldSubmitted,
+          decoration: InputDecoration(
+            hintText: hint,
+            prefixIcon: const Icon(
+              Icons.lock_outline_rounded,
+            ),
+            suffixIcon: IconButton(
+              onPressed: _isLoading
+                  ? null
+                  : onToggleVisibility,
+              icon: Icon(
+                obscureText
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+              ),
+            ),
+          ),
+          validator: validator,
+        ),
+      ],
     );
   }
 
@@ -154,26 +255,24 @@ class _CreatePasswordScreenState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-
     final user = FirebaseAuth.instance.currentUser;
+    final hasPassword = _hasPassword;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-
       appBar: AppBar(
         backgroundColor: colorScheme.surface,
         foregroundColor: colorScheme.onSurface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'Create Password',
+          hasPassword ? 'Change Password' : 'Create Password',
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w700,
             color: colorScheme.onSurface,
           ),
         ),
       ),
-
       body: SafeArea(
         child: ListView(
           physics: const BouncingScrollPhysics(),
@@ -184,10 +283,6 @@ class _CreatePasswordScreenState
             30,
           ),
           children: [
-            // =================================================
-            // ICON
-            // =================================================
-
             Center(
               child: Container(
                 width: 72,
@@ -203,16 +298,12 @@ class _CreatePasswordScreenState
                 ),
               ),
             ),
-
             const SizedBox(height: 20),
-
-            // =================================================
-            // TITLE
-            // =================================================
-
             Center(
               child: Text(
-                'Create Your Password',
+                hasPassword
+                    ? 'Change Your Password'
+                    : 'Create Your Password',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 22,
@@ -221,12 +312,12 @@ class _CreatePasswordScreenState
                 ),
               ),
             ),
-
             const SizedBox(height: 8),
-
             Center(
               child: Text(
-                'Create a password so you can also sign in using your email and password.',
+                hasPassword
+                    ? 'Verify your current password before setting a new one.'
+                    : 'Create a password so you can also sign in using your email and password.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13,
@@ -235,13 +326,9 @@ class _CreatePasswordScreenState
                 ),
               ),
             ),
-
             const SizedBox(height: 28),
 
-            // =================================================
             // EMAIL
-            // =================================================
-
             Text(
               'Email',
               style: TextStyle(
@@ -250,9 +337,7 @@ class _CreatePasswordScreenState
                 color: colorScheme.onSurface,
               ),
             ),
-
             const SizedBox(height: 8),
-
             Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: 16,
@@ -285,123 +370,93 @@ class _CreatePasswordScreenState
                 ],
               ),
             ),
+            const SizedBox(height: 24),
 
-            const SizedBox(height: 20),
-
-            // =================================================
-            // FORM
-            // =================================================
-
+            // PASSWORD FORM
             Form(
               key: _formKey,
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'New Password',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
+                  // PASSWORD LAMA
+                  if (hasPassword) ...[
+                    _buildPasswordField(
+                      label: 'Current Password',
+                      hint: 'Enter your current password',
+                      controller: _currentPasswordController,
+                      obscureText: _obscureCurrentPassword,
+                      onToggleVisibility: () {
+                        setState(() {
+                          _obscureCurrentPassword =
+                          !_obscureCurrentPassword;
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Password lama wajib diisi';
+                        }
+
+                        return null;
+                      },
                     ),
-                  ),
+                    const SizedBox(height: 20),
+                  ],
 
-                  const SizedBox(height: 8),
-
-                  TextFormField(
+                  // PASSWORD BARU
+                  _buildPasswordField(
+                    label: 'New Password',
+                    hint: 'Enter your new password',
                     controller: _passwordController,
                     obscureText: _obscurePassword,
-                    textInputAction:
-                    TextInputAction.next,
-                    decoration: InputDecoration(
-                      hintText: 'Enter your password',
-                      prefixIcon: const Icon(
-                        Icons.lock_outline_rounded,
-                      ),
-                      suffixIcon: IconButton(
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword =
-                            !_obscurePassword;
-                          });
-                        },
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons
-                              .visibility_off_outlined,
-                        ),
-                      ),
-                    ),
+                    onToggleVisibility: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
                     validator: (value) {
-                      if (value == null ||
-                          value.isEmpty) {
-                        return 'Password wajib diisi';
+                      if (value == null || value.isEmpty) {
+                        return 'Password baru wajib diisi';
                       }
 
                       if (value.length < 6) {
                         return 'Password minimal 6 karakter';
                       }
 
+                      if (hasPassword &&
+                          value == _currentPasswordController.text) {
+                        return 'Password baru harus berbeda dari password lama';
+                      }
+
                       return null;
                     },
                   ),
+                  const SizedBox(height: 20),
 
-                  const SizedBox(height: 18),
-
-                  Text(
-                    'Confirm Password',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  TextFormField(
-                    controller:
-                    _confirmPasswordController,
-                    obscureText:
-                    _obscureConfirmPassword,
-                    textInputAction:
-                    TextInputAction.done,
+                  // KONFIRMASI PASSWORD
+                  _buildPasswordField(
+                    label: 'Confirm New Password',
+                    hint: 'Confirm your new password',
+                    controller: _confirmPasswordController,
+                    obscureText: _obscureConfirmPassword,
+                    textInputAction: TextInputAction.done,
+                    onToggleVisibility: () {
+                      setState(() {
+                        _obscureConfirmPassword =
+                        !_obscureConfirmPassword;
+                      });
+                    },
                     onFieldSubmitted: (_) {
                       if (!_isLoading) {
                         _createPassword();
                       }
                     },
-                    decoration: InputDecoration(
-                      hintText: 'Confirm your password',
-                      prefixIcon: const Icon(
-                        Icons.lock_outline_rounded,
-                      ),
-                      suffixIcon: IconButton(
-                        onPressed: () {
-                          setState(() {
-                            _obscureConfirmPassword =
-                            !_obscureConfirmPassword;
-                          });
-                        },
-                        icon: Icon(
-                          _obscureConfirmPassword
-                              ? Icons.visibility_outlined
-                              : Icons
-                              .visibility_off_outlined,
-                        ),
-                      ),
-                    ),
                     validator: (value) {
-                      if (value == null ||
-                          value.isEmpty) {
+                      if (value == null || value.isEmpty) {
                         return 'Konfirmasi password wajib diisi';
                       }
 
-                      if (value !=
-                          _passwordController.text) {
-                        return 'Password tidak sama';
+                      if (value != _passwordController.text) {
+                        return 'Password baru tidak sama';
                       }
 
                       return null;
@@ -410,61 +465,50 @@ class _CreatePasswordScreenState
                 ],
               ),
             ),
-
             const SizedBox(height: 28),
 
-            // =================================================
-            // CREATE PASSWORD BUTTON
-            // =================================================
-
+            // BUTTON
             SizedBox(
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed:
-                _isLoading ? null : _createPassword,
+                onPressed: _isLoading ? null : _createPassword,
                 style: ElevatedButton.styleFrom(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
                 child: _isLoading
                     ? const SizedBox(
                   width: 22,
                   height: 22,
-                  child:
-                  CircularProgressIndicator(
+                  child: CircularProgressIndicator(
                     strokeWidth: 2.5,
                   ),
                 )
-                    : const Text(
-                  'Create Password',
-                  style: TextStyle(
+                    : Text(
+                  hasPassword
+                      ? 'Update Password'
+                      : 'Create Password',
+                  style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
             ),
-
             const SizedBox(height: 18),
 
-            // =================================================
             // INFORMATION
-            // =================================================
-
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color:
-                colorScheme.surfaceContainerHighest,
+                color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Row(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     Icons.info_outline_rounded,
@@ -474,12 +518,13 @@ class _CreatePasswordScreenState
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Setidaknya gunakan 6 karakter. Setelah password dibuat, akun ini dapat digunakan untuk login menggunakan Google maupun email dan password.',
+                      hasPassword
+                          ? 'Masukkan password lama yang benar sebelum mengubah password. Gunakan minimal 6 karakter untuk password baru.'
+                          : 'Gunakan minimal 6 karakter. Setelah password dibuat, akun dapat digunakan untuk login dengan Google maupun email dan password.',
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.5,
-                        color:
-                        colorScheme.onSurfaceVariant,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),

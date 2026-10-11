@@ -13,8 +13,7 @@ class TeacherMaterialsScreen extends StatefulWidget {
       _TeacherMaterialsScreenState();
 }
 
-class _TeacherMaterialsScreenState
-    extends State<TeacherMaterialsScreen> {
+class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
   // ============================================================
   // FIXED TEACHER ID
   // ============================================================
@@ -22,11 +21,9 @@ class _TeacherMaterialsScreenState
   static const String _fixedTeacherId = 'teacher_001';
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String _teacherName = 'Guru';
-  String _teacherId = _fixedTeacherId;
 
   bool _loadingTeacher = true;
   bool _loadingMaterials = true;
@@ -66,12 +63,10 @@ class _TeacherMaterialsScreenState
                   'Guru'
           ).toString();
         } else {
-          teacherName =
-              user.displayName ?? 'Guru';
+          teacherName = user.displayName ?? 'Guru';
         }
       } catch (_) {
-        teacherName =
-            user.displayName ?? 'Guru';
+        teacherName = user.displayName ?? 'Guru';
       }
     }
 
@@ -79,12 +74,7 @@ class _TeacherMaterialsScreenState
 
     setState(() {
       _teacherName =
-      teacherName.trim().isEmpty
-          ? 'Guru'
-          : teacherName.trim();
-
-      // Selalu gunakan ID guru standar.
-      _teacherId = _fixedTeacherId;
+      teacherName.trim().isEmpty ? 'Guru' : teacherName.trim();
 
       _loadingTeacher = false;
     });
@@ -94,82 +84,199 @@ class _TeacherMaterialsScreenState
 
   // ============================================================
   // LOAD ALL MATERIALS
+  //
+  // PENTING:
+  //
+  // COLLECTION "materials" ADALAH SUMBER UTAMA CARD/MENU.
+  //
+  // course_lessons HANYA DIGUNAKAN UNTUK MENCARI VIDEO
+  // YANG TERHUBUNG DENGAN MATERIAL.
+  //
+  // course_lessons TIDAK AKAN DIBUAT MENJADI CARD SENDIRI.
+  //
+  // HASIL:
+  //
+  // 1 MATERIAL
+  // ├── URL materi
+  // └── Video
+  //
+  // menjadi 1 card.
   // ============================================================
 
   Future<void> _loadAllMaterials() async {
-    const teacherId = _fixedTeacherId;
-
     if (mounted) {
       setState(() {
-        _teacherId = teacherId;
         _loadingMaterials = true;
       });
     }
 
     try {
-      final List<_MaterialItem> allItems = [];
-
-      // ========================================================
-      // 1. MATERIALS BIASA
-      // ========================================================
-
       final materialSnapshot = await _firestore
           .collection('materials')
           .where(
         'teacherId',
-        isEqualTo: teacherId,
+        isEqualTo: _fixedTeacherId,
       )
           .get();
 
-      for (final doc in materialSnapshot.docs) {
-        final data = doc.data();
+      final List<_MaterialItem> allItems = [];
 
-        allItems.add(
-          _MaterialItem(
-            id: doc.id,
-            data: data,
-            isCourseLesson: false,
-          ),
-        );
-      }
+      // ==========================================================
+      // LOAD MATERIALS
+      // ==========================================================
 
-      // ========================================================
-      // 2. COURSE LESSONS
-      // ========================================================
+      for (final materialDoc in materialSnapshot.docs) {
+        final Map<String, dynamic> data =
+        Map<String, dynamic>.from(materialDoc.data());
 
-      final lessonSnapshot = await _firestore
-          .collection('course_lessons')
-          .where(
-        'teacherId',
-        isEqualTo: teacherId,
-      )
-          .get();
+        final String materialId = materialDoc.id;
 
-      for (final doc in lessonSnapshot.docs) {
-        final data = doc.data();
+        // --------------------------------------------------------
+        // FIELD MATERIAL
+        // --------------------------------------------------------
 
-        final videoUrl =
-        (data['videoUrl'] ?? '')
-            .toString()
-            .trim();
+        final String courseId =
+        (data['courseId'] ?? '').toString().trim();
 
-        // Hanya tampilkan lesson yang memiliki video.
-        if (videoUrl.isEmpty) {
-          continue;
+        final String courseLessonId =
+        (data['courseLessonId'] ?? '').toString().trim();
+
+        final String materialTitle =
+        (data['title'] ?? '').toString().trim();
+
+        String videoUrl =
+        (data['videoUrl'] ?? '').toString().trim();
+
+        String videoFileName =
+        (data['videoFileName'] ?? '').toString().trim();
+
+        dynamic videoSize = data['videoSize'] ?? 0;
+
+        String resolvedCourseLessonId = courseLessonId;
+
+        // ========================================================
+        // CARI VIDEO YANG TERHUBUNG
+        // ========================================================
+
+        if (courseId.isNotEmpty) {
+          final _ResolvedVideo? resolvedVideo =
+          await _resolveVideoForMaterial(
+            courseId: courseId,
+            courseLessonId: courseLessonId,
+            materialTitle: materialTitle,
+          );
+
+          if (resolvedVideo != null) {
+            // ----------------------------------------------------
+            // Kalau material belum mempunyai video,
+            // gunakan video dari course_lessons.
+            // ----------------------------------------------------
+
+            if (videoUrl.isEmpty) {
+              videoUrl = resolvedVideo.videoUrl;
+            }
+
+            if (videoFileName.isEmpty) {
+              videoFileName = resolvedVideo.videoFileName;
+            }
+
+            if (!_hasValidVideoSize(videoSize) &&
+                resolvedVideo.videoSize > 0) {
+              videoSize = resolvedVideo.videoSize;
+            }
+
+            resolvedCourseLessonId =
+                resolvedVideo.lessonId;
+
+            // ----------------------------------------------------
+            // UPDATE MATERIAL
+            //
+            // Ini penting supaya hubungan material -> video
+            // tersimpan permanen.
+            // ----------------------------------------------------
+
+            final bool needsMigration =
+                courseLessonId != resolvedVideo.lessonId ||
+                    (data['videoUrl'] ?? '').toString().trim() !=
+                        resolvedVideo.videoUrl ||
+                    (data['videoFileName'] ?? '').toString().trim() !=
+                        resolvedVideo.videoFileName ||
+                    !_sameNumber(
+                      data['videoSize'],
+                      resolvedVideo.videoSize,
+                    );
+
+            if (needsMigration) {
+              try {
+                final Map<String, dynamic> migrationData = {
+                  'courseLessonId': resolvedVideo.lessonId,
+                  'videoUrl': resolvedVideo.videoUrl,
+                  'videoFileName': resolvedVideo.videoFileName,
+                  'videoSize': resolvedVideo.videoSize,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                };
+
+                await _firestore
+                    .collection('materials')
+                    .doc(materialId)
+                    .update(migrationData);
+
+                // Update data lokal juga.
+                data.addAll({
+                  'courseLessonId':
+                  resolvedVideo.lessonId,
+                  'videoUrl':
+                  resolvedVideo.videoUrl,
+                  'videoFileName':
+                  resolvedVideo.videoFileName,
+                  'videoSize':
+                  resolvedVideo.videoSize,
+                });
+              } catch (e) {
+                debugPrint(
+                  'Gagal migrasi video material '
+                      '$materialId: $e',
+                );
+
+                // Walaupun migrasi gagal, data tetap
+                // ditampilkan menggunakan hasil resolver.
+                data['courseLessonId'] =
+                    resolvedVideo.lessonId;
+                data['videoUrl'] =
+                    resolvedVideo.videoUrl;
+                data['videoFileName'] =
+                    resolvedVideo.videoFileName;
+                data['videoSize'] =
+                    resolvedVideo.videoSize;
+              }
+            } else {
+              data['courseLessonId'] =
+                  resolvedVideo.lessonId;
+              data['videoUrl'] =
+                  resolvedVideo.videoUrl;
+              data['videoFileName'] =
+                  resolvedVideo.videoFileName;
+              data['videoSize'] =
+                  resolvedVideo.videoSize;
+            }
+          }
         }
 
+        // ========================================================
+        // MASUKKAN SATU CARD MATERIAL
+        // ========================================================
+
         allItems.add(
           _MaterialItem(
-            id: doc.id,
+            id: materialId,
             data: data,
-            isCourseLesson: true,
           ),
         );
       }
 
-      // ========================================================
+      // ==========================================================
       // SORT
-      // ========================================================
+      // ==========================================================
 
       allItems.sort((a, b) {
         final aCreated = a.data['createdAt'];
@@ -212,6 +319,9 @@ class _TeacherMaterialsScreenState
         _loadingMaterials = false;
       });
 
+      ScaffoldMessenger.of(context)
+          .hideCurrentSnackBar();
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -219,6 +329,170 @@ class _TeacherMaterialsScreenState
           ),
         ),
       );
+    }
+  }
+
+  // ============================================================
+  // RESOLVE VIDEO
+  //
+  // URUTAN PENCARIAN:
+  //
+  // 1. courseLessonId
+  // 2. title material == title lesson
+  // 3. hanya ada satu video pada course
+  //
+  // Dengan cara ini video lama yang courseLessonId-nya kosong
+  // tetap bisa ditemukan.
+  // ============================================================
+
+  Future<_ResolvedVideo?> _resolveVideoForMaterial({
+    required String courseId,
+    required String courseLessonId,
+    required String materialTitle,
+  }) async {
+    try {
+      // ========================================================
+      // 1. EXACT COURSE LESSON ID
+      // ========================================================
+
+      if (courseLessonId.isNotEmpty) {
+        final lessonDoc = await _firestore
+            .collection('course_lessons')
+            .doc(courseLessonId)
+            .get();
+
+        if (lessonDoc.exists) {
+          final data = lessonDoc.data();
+
+          if (data != null) {
+            final String videoUrl =
+            (data['videoUrl'] ?? '').toString().trim();
+
+            if (videoUrl.isNotEmpty) {
+              return _ResolvedVideo(
+                lessonId: lessonDoc.id,
+                videoUrl: videoUrl,
+                videoFileName:
+                (data['videoFileName'] ?? '')
+                    .toString()
+                    .trim(),
+                videoSize: _toInt(
+                  data['videoSize'],
+                ),
+              );
+            }
+          }
+        }
+      }
+
+      // ========================================================
+      // 2. AMBIL SEMUA LESSON DALAM COURSE
+      // ========================================================
+
+      final lessonSnapshot = await _firestore
+          .collection('course_lessons')
+          .where(
+        'courseId',
+        isEqualTo: courseId,
+      )
+          .get();
+
+      final List<_ResolvedVideo> videos = [];
+
+      for (final lessonDoc in lessonSnapshot.docs) {
+        final data = lessonDoc.data();
+
+        final String videoUrl =
+        (data['videoUrl'] ?? '').toString().trim();
+
+        if (videoUrl.isEmpty) {
+          continue;
+        }
+
+        videos.add(
+          _ResolvedVideo(
+            lessonId: lessonDoc.id,
+            videoUrl: videoUrl,
+            videoFileName:
+            (data['videoFileName'] ?? '')
+                .toString()
+                .trim(),
+            videoSize: _toInt(
+              data['videoSize'],
+            ),
+          ),
+        );
+      }
+
+      if (videos.isEmpty) {
+        return null;
+      }
+
+      // ========================================================
+      // 3. CARI BERDASARKAN TITLE
+      // ========================================================
+
+      final String normalizedMaterialTitle =
+      materialTitle.trim().toLowerCase();
+
+      if (normalizedMaterialTitle.isNotEmpty) {
+        for (final lessonDoc in lessonSnapshot.docs) {
+          final data = lessonDoc.data();
+
+          final String videoUrl =
+          (data['videoUrl'] ?? '').toString().trim();
+
+          if (videoUrl.isEmpty) {
+            continue;
+          }
+
+          final String lessonTitle =
+          (
+              data['title'] ??
+                  data['lessonTitle'] ??
+                  ''
+          ).toString().trim().toLowerCase();
+
+          if (lessonTitle.isNotEmpty &&
+              lessonTitle == normalizedMaterialTitle) {
+            return _ResolvedVideo(
+              lessonId: lessonDoc.id,
+              videoUrl: videoUrl,
+              videoFileName:
+              (data['videoFileName'] ?? '')
+                  .toString()
+                  .trim(),
+              videoSize: _toInt(
+                data['videoSize'],
+              ),
+            );
+          }
+        }
+      }
+
+      // ========================================================
+      // 4. JIKA HANYA ADA SATU VIDEO
+      //
+      // Ini khusus untuk data lama yang courseLessonId-nya
+      // belum tersimpan.
+      // ========================================================
+
+      if (videos.length == 1) {
+        return videos.first;
+      }
+
+      // ========================================================
+      // Jika lebih dari satu video dan tidak ada title yang
+      // cocok, jangan memilih secara sembarangan.
+      // ========================================================
+
+      return null;
+    } catch (e) {
+      debugPrint(
+        'Gagal resolve video untuk course $courseId: $e',
+      );
+
+      return null;
     }
   }
 
@@ -244,6 +518,9 @@ class _TeacherMaterialsScreenState
       await _loadAllMaterials();
 
       if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .hideCurrentSnackBar();
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -280,6 +557,9 @@ class _TeacherMaterialsScreenState
 
       if (!mounted) return;
 
+      ScaffoldMessenger.of(context)
+          .hideCurrentSnackBar();
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -310,12 +590,16 @@ class _TeacherMaterialsScreenState
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loadAllMaterials,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(
+              Icons.refresh,
+            ),
           ),
           IconButton(
             tooltip: 'Tambah Materi',
             onPressed: () => _openMaterialForm(),
-            icon: const Icon(Icons.add),
+            icon: const Icon(
+              Icons.add,
+            ),
           ),
         ],
       ),
@@ -343,7 +627,6 @@ class _TeacherMaterialsScreenState
             return _buildMaterialCard(
               item.id,
               item.data,
-              item.isCourseLesson,
             );
           },
         ),
@@ -351,8 +634,12 @@ class _TeacherMaterialsScreenState
       floatingActionButton:
       FloatingActionButton.extended(
         onPressed: () => _openMaterialForm(),
-        icon: const Icon(Icons.add),
-        label: const Text('Tambah Materi'),
+        icon: const Icon(
+          Icons.add,
+        ),
+        label: const Text(
+          'Tambah Materi',
+        ),
       ),
     );
   }
@@ -364,33 +651,45 @@ class _TeacherMaterialsScreenState
   Widget _buildMaterialCard(
       String materialId,
       Map<String, dynamic> data,
-      bool isCourseLesson,
       ) {
     final theme = Theme.of(context);
 
-    final title = isCourseLesson
-        ? (data['title'] ??
-        data['lessonTitle'] ??
-        data['name'] ??
-        'Video Pembelajaran')
-        .toString()
-        : (data['title'] ?? 'Materi').toString();
+    final title =
+    (data['title'] ?? 'Materi').toString();
+
+    final subject =
+    (data['subject'] ?? '').toString();
 
     final description =
-    (data['description'] ?? data['content'] ?? '')
-        .toString();
+    (
+        data['description'] ??
+            data['content'] ??
+            ''
+    ).toString();
+
+    final content =
+    (data['content'] ?? '').toString();
 
     final courseName =
-    (data['courseName'] ??
-        data['courseTitle'] ??
-        '')
-        .toString();
+    (
+        data['courseName'] ??
+            data['courseTitle'] ??
+            ''
+    ).toString();
+
+    final classId =
+    (data['classId'] ?? '').toString();
 
     final className =
     (data['className'] ?? '').toString();
 
-    final classId =
-    (data['classId'] ?? '').toString();
+    final displayClass =
+    className.trim().isNotEmpty
+        ? className
+        : _classNameFromId(classId);
+
+    final type =
+    (data['type'] ?? 'Materi').toString();
 
     final videoUrl =
     (data['videoUrl'] ?? '')
@@ -404,317 +703,68 @@ class _TeacherMaterialsScreenState
     final videoSize =
     data['videoSize'];
 
+    final bool hasVideo =
+        videoUrl.isNotEmpty;
+
     final attachmentUrl =
-    (data['attachmentUrl'] ??
-        data['fileUrl'] ??
-        '')
+    (
+        data['attachmentUrl'] ??
+            data['fileUrl'] ??
+            ''
+    ).toString().trim();
+
+    final bool hasAttachment =
+        attachmentUrl.isNotEmpty;
+
+    final courseLessonId =
+    (data['courseLessonId'] ?? '')
         .toString()
         .trim();
 
-    // ==========================================================
-    // COURSE LESSON VIDEO
-    // ==========================================================
+    IconData typeIcon;
 
-    if (isCourseLesson) {
-      return Card(
-        margin:
-        const EdgeInsets.only(bottom: 14),
-        elevation: 1,
-        clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding:
-          const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    decoration:
-                    BoxDecoration(
-                      color: Colors.red.withValues(
-                        alpha: 0.1,
-                      ),
-                      borderRadius:
-                      BorderRadius.circular(
-                        14,
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.play_circle_outline,
-                      color: Colors.red,
-                      size: 30,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow:
-                          TextOverflow.ellipsis,
-                          style:
-                          const TextStyle(
-                            fontSize: 17,
-                            fontWeight:
-                            FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        const Text(
-                          'Video Course',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontWeight:
-                            FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+    switch (type) {
+      case 'Video':
+        typeIcon =
+            Icons.play_circle_outline;
+        break;
 
-              if (courseName.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                _buildInfoChip(
-                  icon:
-                  Icons.school_outlined,
-                  text: courseName,
-                ),
-              ],
+      case 'PDF':
+        typeIcon =
+            Icons.picture_as_pdf_outlined;
+        break;
 
-              if (className.isNotEmpty ||
-                  classId.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _buildInfoChip(
-                  icon:
-                  Icons.class_outlined,
-                  text: className.isNotEmpty
-                      ? className
-                      : classId,
-                ),
-              ],
+      case 'Dokumen':
+        typeIcon =
+            Icons.description_outlined;
+        break;
 
-              if (description.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Text(
-                  description,
-                  maxLines: 3,
-                  overflow:
-                  TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color:
-                    Colors.grey.shade700,
-                    height: 1.4,
-                  ),
-                ),
-              ],
+      case 'Link':
+        typeIcon =
+            Icons.link_rounded;
+        break;
 
-              const SizedBox(height: 14),
-
-              Container(
-                width: double.infinity,
-                padding:
-                const EdgeInsets.all(14),
-                decoration:
-                BoxDecoration(
-                  color: theme
-                      .colorScheme
-                      .primary
-                      .withValues(
-                    alpha: 0.06,
-                  ),
-                  borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
-                  border: Border.all(
-                    color: theme
-                        .colorScheme
-                        .primary
-                        .withValues(
-                      alpha: 0.15,
-                    ),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.video_library_outlined,
-                      color: theme
-                          .colorScheme
-                          .primary,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Video terlampir',
-                            style: TextStyle(
-                              fontWeight:
-                              FontWeight.bold,
-                            ),
-                          ),
-                          if (videoFileName
-                              .isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text(
-                              videoFileName,
-                              maxLines: 1,
-                              overflow:
-                              TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors
-                                    .grey.shade600,
-                              ),
-                            ),
-                          ],
-                          if (videoSize is num &&
-                              videoSize > 0) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              _formatFileSize(
-                                videoSize.toInt(),
-                              ),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors
-                                    .grey.shade600,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              if (videoUrl.isNotEmpty)
-                Container(
-                  width: double.infinity,
-                  padding:
-                  const EdgeInsets.all(12),
-                  decoration:
-                  BoxDecoration(
-                    color: Colors.grey.withValues(
-                      alpha: 0.06,
-                    ),
-                    borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.link,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          videoUrl,
-                          maxLines: 2,
-                          overflow:
-                          TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                            Colors.grey.shade700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-              const SizedBox(height: 14),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding:
-                      const EdgeInsets.symmetric(
-                        vertical: 10,
-                      ),
-                      decoration:
-                      BoxDecoration(
-                        color: Colors.green
-                            .withValues(
-                          alpha: 0.08,
-                        ),
-                        borderRadius:
-                        BorderRadius.circular(
-                          10,
-                        ),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment:
-                        MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons
-                                .check_circle_outline,
-                            size: 18,
-                            color:
-                            Colors.green,
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            'Video tersedia',
-                            style: TextStyle(
-                              color: Colors.green,
-                              fontWeight:
-                              FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
+      default:
+        typeIcon =
+            Icons.menu_book_outlined;
     }
 
-    // ==========================================================
-    // MATERIAL BIASA
-    // ==========================================================
-
     return Card(
-      margin:
-      const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(
+        bottom: 14,
+      ),
       elevation: 1,
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding:
-        const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment:
           CrossAxisAlignment.start,
           children: [
+            // ==================================================
+            // HEADER
+            // ==================================================
+
             Row(
               crossAxisAlignment:
               CrossAxisAlignment.start,
@@ -722,8 +772,7 @@ class _TeacherMaterialsScreenState
                 Container(
                   width: 50,
                   height: 50,
-                  decoration:
-                  BoxDecoration(
+                  decoration: BoxDecoration(
                     color: theme
                         .colorScheme
                         .primary
@@ -731,18 +780,17 @@ class _TeacherMaterialsScreenState
                       alpha: 0.1,
                     ),
                     borderRadius:
-                    BorderRadius.circular(
-                      14,
-                    ),
+                    BorderRadius.circular(14),
                   ),
                   child: Icon(
-                    Icons.menu_book_outlined,
-                    color: theme
-                        .colorScheme
-                        .primary,
+                    typeIcon,
+                    color:
+                    theme.colorScheme.primary,
                   ),
                 ),
+
                 const SizedBox(width: 12),
+
                 Expanded(
                   child: Column(
                     crossAxisAlignment:
@@ -760,24 +808,33 @@ class _TeacherMaterialsScreenState
                           FontWeight.bold,
                         ),
                       ),
-                      if (courseName.isNotEmpty) ...[
+
+                      if (subject
+                          .trim()
+                          .isNotEmpty) ...[
                         const SizedBox(height: 5),
                         Text(
-                          courseName,
+                          subject,
                           maxLines: 1,
                           overflow:
                           TextOverflow.ellipsis,
                           style: TextStyle(
-                            color:
-                            Colors.grey.shade600,
+                            color: theme
+                                .colorScheme
+                                .primary,
                             fontWeight:
-                            FontWeight.w500,
+                            FontWeight.w600,
                           ),
                         ),
                       ],
                     ],
                   ),
                 ),
+
+                // ==================================================
+                // MENU
+                // ==================================================
+
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'edit') {
@@ -832,57 +889,360 @@ class _TeacherMaterialsScreenState
               ],
             ),
 
-            if (description.isNotEmpty) ...[
+            // ==================================================
+            // COURSE + CLASS
+            // ==================================================
+
+            if (courseName
+                .trim()
+                .isNotEmpty ||
+                displayClass
+                    .trim()
+                    .isNotEmpty) ...[
               const SizedBox(height: 14),
+
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (courseName
+                      .trim()
+                      .isNotEmpty)
+                    _buildInfoChip(
+                      icon:
+                      Icons.school_outlined,
+                      text: courseName,
+                    ),
+
+                  if (displayClass
+                      .trim()
+                      .isNotEmpty)
+                    _buildInfoChip(
+                      icon:
+                      Icons.class_outlined,
+                      text: displayClass,
+                    ),
+                ],
+              ),
+            ],
+
+            // ==================================================
+            // DESCRIPTION
+            // ==================================================
+
+            if (description
+                .trim()
+                .isNotEmpty) ...[
+              const SizedBox(height: 14),
+
               Text(
                 description,
                 maxLines: 3,
                 overflow:
                 TextOverflow.ellipsis,
                 style: TextStyle(
-                  color:
-                  Colors.grey.shade700,
+                  color: Colors.grey.shade700,
                   height: 1.4,
                 ),
               ),
             ],
 
+            // ==================================================
+            // CONTENT
+            // ==================================================
+
+            if (content
+                .trim()
+                .isNotEmpty &&
+                content.trim() !=
+                    description.trim()) ...[
+              const SizedBox(height: 8),
+
+              Text(
+                'Isi: $content',
+                maxLines: 2,
+                overflow:
+                TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color:
+                  Colors.grey.shade600,
+                ),
+              ),
+            ],
+
             const SizedBox(height: 14),
+
             const Divider(height: 1),
+
             const SizedBox(height: 14),
+
+            // ==================================================
+            // INFORMATION CHIPS
+            // ==================================================
 
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (classId.isNotEmpty)
+                _buildInfoChip(
+                  icon:
+                  Icons.attach_file_outlined,
+                  text: type,
+                ),
+
+                if (hasAttachment)
                   _buildInfoChip(
                     icon:
-                    Icons.class_outlined,
-                    text: classId,
-                  ),
-                if (courseName.isNotEmpty)
-                  _buildInfoChip(
-                    icon:
-                    Icons.school_outlined,
-                    text: courseName,
-                  ),
-                if (attachmentUrl.isNotEmpty)
-                  _buildInfoChip(
-                    icon:
-                    Icons.attach_file_outlined,
+                    Icons.attachment_outlined,
                     text:
-                    'Lampiran tersedia',
+                    'URL materi tersedia',
                   ),
-                if (videoUrl.isNotEmpty)
+
+                if (hasVideo)
                   _buildInfoChip(
                     icon:
                     Icons.video_library_outlined,
                     text:
                     'Video tersedia',
                   ),
+
+                if (courseLessonId
+                    .isNotEmpty)
+                  _buildInfoChip(
+                    icon:
+                    Icons.play_circle_outline,
+                    text:
+                    'Lesson terhubung',
+                  ),
               ],
             ),
+
+            // ==================================================
+            // URL MATERI
+            // ==================================================
+
+            if (hasAttachment) ...[
+              const SizedBox(height: 14),
+
+              Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color:
+                  Colors.grey.withValues(
+                    alpha: 0.06,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.link,
+                      size: 18,
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    Expanded(
+                      child: Text(
+                        attachmentUrl,
+                        maxLines: 2,
+                        overflow:
+                        TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color:
+                          Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ==================================================
+            // VIDEO
+            // ==================================================
+
+            if (hasVideo) ...[
+              const SizedBox(height: 14),
+
+              Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: theme
+                      .colorScheme
+                      .primary
+                      .withValues(
+                    alpha: 0.06,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(12),
+                  border: Border.all(
+                    color: theme
+                        .colorScheme
+                        .primary
+                        .withValues(
+                      alpha: 0.15,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons
+                          .video_library_outlined,
+                      color:
+                      theme.colorScheme.primary,
+                    ),
+
+                    const SizedBox(width: 10),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Video terlampir',
+                            style: TextStyle(
+                              fontWeight:
+                              FontWeight.bold,
+                            ),
+                          ),
+
+                          if (videoFileName
+                              .trim()
+                              .isNotEmpty) ...[
+                            const SizedBox(height: 3),
+
+                            Text(
+                              videoFileName,
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow
+                                  .ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors
+                                    .grey
+                                    .shade600,
+                              ),
+                            ),
+                          ],
+
+                          if (videoSize is num &&
+                              videoSize > 0) ...[
+                            const SizedBox(height: 2),
+
+                            Text(
+                              _formatFileSize(
+                                videoSize.toInt(),
+                              ),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors
+                                    .grey
+                                    .shade600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color:
+                  Colors.grey.withValues(
+                    alpha: 0.06,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.link,
+                      size: 18,
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    Expanded(
+                      child: Text(
+                        videoUrl,
+                        maxLines: 2,
+                        overflow:
+                        TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color:
+                          Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.symmetric(
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                  Colors.green.withValues(
+                    alpha: 0.08,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  mainAxisAlignment:
+                  MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons
+                          .check_circle_outline,
+                      size: 18,
+                      color: Colors.green,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      'Video tersedia',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontWeight:
+                        FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ==================================================
+            // ACTION BUTTON
+            // ==================================================
 
             const SizedBox(height: 14),
 
@@ -893,7 +1253,8 @@ class _TeacherMaterialsScreenState
                   OutlinedButton.icon(
                     onPressed: () {
                       _openMaterialForm(
-                        materialId: materialId,
+                        materialId:
+                        materialId,
                         data: data,
                       );
                     },
@@ -905,12 +1266,14 @@ class _TeacherMaterialsScreenState
                     const Text('Edit'),
                   ),
                 ),
+
                 const SizedBox(width: 10),
+
                 Expanded(
                   child:
                   OutlinedButton.icon(
-                    style: OutlinedButton
-                        .styleFrom(
+                    style:
+                    OutlinedButton.styleFrom(
                       foregroundColor:
                       Colors.red,
                       side: BorderSide(
@@ -956,9 +1319,9 @@ class _TeacherMaterialsScreenState
         horizontal: 10,
         vertical: 7,
       ),
-      decoration:
-      BoxDecoration(
-        color: Colors.grey.withValues(
+      decoration: BoxDecoration(
+        color:
+        Colors.grey.withValues(
           alpha: 0.08,
         ),
         borderRadius:
@@ -971,10 +1334,11 @@ class _TeacherMaterialsScreenState
           Icon(
             icon,
             size: 16,
-            color:
-            Colors.grey.shade700,
+            color: Colors.grey.shade700,
           ),
+
           const SizedBox(width: 6),
+
           Text(
             text,
             style: TextStyle(
@@ -991,11 +1355,35 @@ class _TeacherMaterialsScreenState
   }
 
   // ============================================================
+  // CLASS NAME
+  // ============================================================
+
+  String _classNameFromId(String classId) {
+    switch (classId) {
+      case 'X_RPL_1':
+        return 'X RPL 1';
+
+      case 'XI_RPL_1':
+        return 'XI RPL 1';
+
+      case 'XI_RPL_2':
+        return 'XI RPL 2';
+
+      case 'XII_RPL_1':
+        return 'XII RPL 1';
+
+      default:
+        return classId.isEmpty
+            ? ''
+            : classId;
+    }
+  }
+
+  // ============================================================
   // EMPTY
   // ============================================================
 
-  Widget _buildEmpty(
-      ThemeData theme) {
+  Widget _buildEmpty(ThemeData theme) {
     return Center(
       child: Padding(
         padding:
@@ -1007,8 +1395,7 @@ class _TeacherMaterialsScreenState
             Container(
               width: 90,
               height: 90,
-              decoration:
-              BoxDecoration(
+              decoration: BoxDecoration(
                 color: theme
                     .colorScheme
                     .primary
@@ -1020,12 +1407,13 @@ class _TeacherMaterialsScreenState
               child: Icon(
                 Icons.menu_book_outlined,
                 size: 44,
-                color: theme
-                    .colorScheme
-                    .primary,
+                color:
+                theme.colorScheme.primary,
               ),
             ),
+
             const SizedBox(height: 20),
+
             const Text(
               'Belum Ada Materi',
               style: TextStyle(
@@ -1034,9 +1422,11 @@ class _TeacherMaterialsScreenState
                 FontWeight.bold,
               ),
             ),
+
             const SizedBox(height: 8),
+
             Text(
-              'Belum ada materi atau video pembelajaran yang ditambahkan.',
+              'Belum ada materi pembelajaran yang ditambahkan.',
               textAlign:
               TextAlign.center,
               style: TextStyle(
@@ -1044,12 +1434,15 @@ class _TeacherMaterialsScreenState
                 Colors.grey.shade600,
               ),
             ),
+
             const SizedBox(height: 22),
+
             FilledButton.icon(
-              onPressed: () =>
-                  _openMaterialForm(),
-              icon:
-              const Icon(Icons.add),
+              onPressed:
+                  () => _openMaterialForm(),
+              icon: const Icon(
+                Icons.add,
+              ),
               label:
               const Text(
                 'Tambah Materi',
@@ -1065,8 +1458,7 @@ class _TeacherMaterialsScreenState
   // FILE SIZE
   // ============================================================
 
-  String _formatFileSize(
-      int bytes) {
+  String _formatFileSize(int bytes) {
     if (bytes <= 0) {
       return '0 B';
     }
@@ -1094,6 +1486,54 @@ class _TeacherMaterialsScreenState
       size >= 10 ? 0 : 1,
     )} ${units[unitIndex]}';
   }
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+
+  int _toInt(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return int.tryParse(
+      value?.toString() ?? '',
+    ) ??
+        0;
+  }
+
+  bool _hasValidVideoSize(dynamic value) {
+    return _toInt(value) > 0;
+  }
+
+  bool _sameNumber(
+      dynamic first,
+      int second,
+      ) {
+    return _toInt(first) == second;
+  }
+}
+
+// ================================================================
+// RESOLVED VIDEO
+// ================================================================
+
+class _ResolvedVideo {
+  final String lessonId;
+  final String videoUrl;
+  final String videoFileName;
+  final int videoSize;
+
+  const _ResolvedVideo({
+    required this.lessonId,
+    required this.videoUrl,
+    required this.videoFileName,
+    required this.videoSize,
+  });
 }
 
 // ================================================================
@@ -1103,11 +1543,9 @@ class _TeacherMaterialsScreenState
 class _MaterialItem {
   final String id;
   final Map<String, dynamic> data;
-  final bool isCourseLesson;
 
   const _MaterialItem({
     required this.id,
     required this.data,
-    required this.isCourseLesson,
   });
 }

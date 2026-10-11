@@ -1,3 +1,4 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -14,7 +15,6 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -31,7 +31,22 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // ============================================================
-  // FIRESTORE USER PROFILE
+  // PESAN LOGIN
+  // ============================================================
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+  }
+
+  // ============================================================
+  // MEMBUAT PROFIL SISWA BARU UNTUK GOOGLE SIGN-IN
+  // Profil yang sudah ada tidak akan ditimpa.
   // ============================================================
 
   Future<void> _ensureUserProfile(User user) async {
@@ -41,74 +56,101 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final userDoc = await userRef.get();
 
-    // Hanya membuat profile jika benar-benar belum ada.
-    // Profile yang sudah ada tidak akan ditimpa.
-    if (!userDoc.exists) {
-      await userRef.set({
-        'name': user.displayName ?? '',
-        'username': user.displayName ?? '',
-        'email': user.email ?? '',
-        'photoUrl': user.photoURL ?? '',
-        'phone': '',
-        'gender': '',
-        'birthDate': '',
-        'address': '',
-        'school': '',
-        'className': '',
-        'major': '',
-        'nisn': '',
-        'bio': '',
-        'role': 'student',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
+    if (userDoc.exists) return;
+
+    await userRef.set({
+      'uid': user.uid,
+      'name': user.displayName ?? '',
+      'username': user.displayName ?? '',
+      'email': user.email ?? '',
+      'photoUrl': user.photoURL ?? '',
+      'phone': '',
+      'gender': '',
+      'birthDate': '',
+      'address': '',
+      'school': '',
+      'className': '',
+      'major': '',
+      'nisn': '',
+      'bio': '',
+      'role': 'student',
+      'active': true,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ============================================================
-  // LOGIN BERDASARKAN ROLE
+  // LOGIN BERDASARKAN ROLE DAN STATUS AKUN
+  //
+  // createStudentIfMissing hanya digunakan untuk Google Sign-In
+  // yang membuat akun siswa baru.
   // ============================================================
 
-  Future<void> _loginBasedOnRole(User user) async {
+  Future<bool> _loginBasedOnRole(
+      User user, {
+        bool createStudentIfMissing = false,
+      }) async {
     try {
       final userRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid);
 
-      final userDoc = await userRef.get();
+      var userDoc = await userRef.get();
 
-      // ----------------------------------------------------------
-      // PROFILE BELUM ADA
-      // ----------------------------------------------------------
-
-      if (!userDoc.exists) {
+      // Login email/password tidak boleh otomatis membuat
+      // profil baru jika profil pengguna tidak ditemukan.
+      if (!userDoc.exists && createStudentIfMissing) {
         await _ensureUserProfile(user);
-
-        if (!mounted) return;
-
-        _goToHome();
-        return;
+        userDoc = await userRef.get();
       }
 
-      // ----------------------------------------------------------
-      // AMBIL ROLE
-      // ----------------------------------------------------------
+      if (!userDoc.exists) {
+        await FirebaseAuth.instance.signOut();
+
+        _showMessage(
+          'Profil akun tidak ditemukan. '
+              'Hubungi administrator sekolah.',
+        );
+
+        return false;
+      }
 
       final data = userDoc.data();
 
-      final role = (data?['role'] ?? 'student')
+      if (data == null) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage('Data profil akun tidak valid.');
+        return false;
+      }
+
+      // ----------------------------------------------------------
+      // CEK STATUS AKUN
+      // ----------------------------------------------------------
+
+      if (data['active'] == false) {
+        await FirebaseAuth.instance.signOut();
+
+        _showMessage(
+          'Akun kamu telah dinonaktifkan oleh administrator.',
+        );
+
+        return false;
+      }
+
+      final role = (data['role'] ?? '')
           .toString()
           .trim()
           .toLowerCase();
 
-      debugPrint('========================================');
-      debugPrint('LOGIN USER');
+      debugPrint('========== LOGIN USER ==========');
       debugPrint('UID   : ${user.uid}');
       debugPrint('EMAIL : ${user.email}');
       debugPrint('ROLE  : $role');
-      debugPrint('========================================');
+      debugPrint('ACTIVE: ${data['active'] ?? true}');
+      debugPrint('================================');
 
-      if (!mounted) return;
+      if (!mounted) return false;
 
       // ----------------------------------------------------------
       // ADMIN
@@ -121,11 +163,11 @@ class _LoginScreenState extends State<LoginScreen> {
               (route) => false,
         );
 
-        return;
+        return true;
       }
 
       // ----------------------------------------------------------
-      // TEACHER / GURU
+      // GURU
       // ----------------------------------------------------------
 
       if (role == 'teacher') {
@@ -135,31 +177,47 @@ class _LoginScreenState extends State<LoginScreen> {
               (route) => false,
         );
 
-        return;
+        return true;
       }
 
       // ----------------------------------------------------------
-      // STUDENT
+      // SISWA
       // ----------------------------------------------------------
 
-      _goToHome();
-    } catch (e) {
-      debugPrint('Error cek role: $e');
+      if (role == 'student') {
+        _goToHome();
+        return true;
+      }
 
-      if (!mounted) return;
+      // Role kosong atau tidak dikenal tidak boleh diarahkan
+      // otomatis ke dashboard siswa.
+      await FirebaseAuth.instance.signOut();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal membaca data akun: $e',
-          ),
-        ),
+      _showMessage(
+        'Role akun tidak valid. Hubungi administrator.',
       );
+
+      return false;
+    } catch (e) {
+      debugPrint('Error memeriksa profil dan role: $e');
+
+      // Jika status akun tidak dapat diverifikasi, jangan
+      // melanjutkan ke dashboard.
+      try {
+        await FirebaseAuth.instance.signOut();
+      } catch (_) {}
+
+      _showMessage(
+        'Gagal memverifikasi akun. '
+            'Periksa koneksi internet lalu coba lagi.',
+      );
+
+      return false;
     }
   }
 
   // ============================================================
-  // GO TO HOME
+  // HOME
   // ============================================================
 
   void _goToHome() {
@@ -177,43 +235,23 @@ class _LoginScreenState extends State<LoginScreen> {
   // ============================================================
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
+    if (_loading || _googleLoading) return;
 
-    if (_loading || _googleLoading) {
-      return;
-    }
-
-    setState(() {
-      _loading = true;
-    });
+    setState(() => _loading = true);
 
     try {
-      final email = _emailController.text.trim();
-      final password = _passwordController.text;
-
-      // ----------------------------------------------------------
-      // FIREBASE LOGIN
-      // ----------------------------------------------------------
-
       final credential =
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
-        password: password,
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
       );
 
       final user = credential.user;
 
       if (user == null) {
-        throw FirebaseAuthException(
-          code: 'user-not-found',
-        );
+        throw FirebaseAuthException(code: 'user-not-found');
       }
-
-      // ----------------------------------------------------------
-      // CEK ROLE
-      // ----------------------------------------------------------
 
       await _loginBasedOnRole(user);
     } on FirebaseAuthException catch (e) {
@@ -226,89 +264,53 @@ class _LoginScreenState extends State<LoginScreen> {
         case 'wrong-password':
           message = 'Email atau password salah.';
           break;
-
         case 'user-not-found':
           message = 'Akun dengan email tersebut tidak ditemukan.';
           break;
-
         case 'invalid-email':
           message = 'Format email tidak valid.';
           break;
-
         case 'user-disabled':
           message = 'Akun ini telah dinonaktifkan.';
           break;
-
         case 'too-many-requests':
-          message =
-          'Terlalu banyak percobaan. Silakan coba lagi nanti.';
+          message = 'Terlalu banyak percobaan. Coba lagi nanti.';
           break;
-
         case 'network-request-failed':
           message = 'Periksa koneksi internet kamu.';
           break;
-
         default:
           message = e.message ?? 'Login gagal. Silakan coba lagi.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      _showMessage(message);
     } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Terjadi kesalahan saat login: $e',
-          ),
-        ),
-      );
+      _showMessage('Terjadi kesalahan saat login: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   // ============================================================
-  // GOOGLE LOGIN
+  // GOOGLE SIGN-IN
   // ============================================================
 
   Future<void> _signInWithGoogle() async {
-    if (_googleLoading || _loading) {
-      return;
-    }
+    if (_googleLoading || _loading) return;
 
-    setState(() {
-      _googleLoading = true;
-    });
+    setState(() => _googleLoading = true);
 
     try {
-      // ----------------------------------------------------------
-      // GOOGLE SIGN IN
-      // ----------------------------------------------------------
-
-      final GoogleSignInAccount googleUser =
+      final googleUser =
       await GoogleSignIn.instance.authenticate();
 
-      final GoogleSignInAuthentication googleAuth =
-          googleUser.authentication;
+      final googleAuth = googleUser.authentication;
 
       final googleCredential = GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
       );
 
       try {
-        // --------------------------------------------------------
-        // NORMAL GOOGLE LOGIN
-        // --------------------------------------------------------
-
         final userCredential =
         await FirebaseAuth.instance.signInWithCredential(
           googleCredential,
@@ -317,18 +319,14 @@ class _LoginScreenState extends State<LoginScreen> {
         final user = userCredential.user;
 
         if (user == null) {
-          throw FirebaseAuthException(
-            code: 'user-not-found',
-          );
+          throw FirebaseAuthException(code: 'user-not-found');
         }
 
-        // Cek role setelah Google Login.
-        await _loginBasedOnRole(user);
+        await _loginBasedOnRole(
+          user,
+          createStudentIfMissing: true,
+        );
       } on FirebaseAuthException catch (e) {
-        // --------------------------------------------------------
-        // EMAIL SUDAH ADA DENGAN EMAIL/PASSWORD
-        // --------------------------------------------------------
-
         if (e.code == 'account-exists-with-different-credential') {
           await _handleGoogleAccountLinking(
             googleCredential,
@@ -341,62 +339,35 @@ class _LoginScreenState extends State<LoginScreen> {
     } on GoogleSignInException catch (e) {
       if (!mounted) return;
 
-      if (e.code == GoogleSignInExceptionCode.canceled) {
-        return;
-      }
+      if (e.code == GoogleSignInExceptionCode.canceled) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Google Login gagal: '
-                '${e.description ?? e.code.name}',
-          ),
-        ),
+      _showMessage(
+        'Google Login gagal: ${e.description ?? e.code.name}',
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      String message = 'Google Login gagal.';
+      String message;
 
       switch (e.code) {
         case 'credential-already-in-use':
-          message =
-          'Akun Google tersebut sudah terhubung ke akun lain.';
+          message = 'Akun Google sudah terhubung ke akun lain.';
           break;
-
         case 'network-request-failed':
           message = 'Periksa koneksi internet kamu.';
           break;
-
         case 'user-disabled':
           message = 'Akun ini telah dinonaktifkan.';
           break;
-
         default:
           message = e.message ?? 'Google Login gagal.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      _showMessage(message);
     } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Terjadi kesalahan saat Login dengan Google: $e',
-          ),
-        ),
-      );
+      _showMessage('Terjadi kesalahan saat Google Login: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _googleLoading = false;
-        });
-      }
+      if (mounted) setState(() => _googleLoading = false);
     }
   }
 
@@ -412,98 +383,81 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final passwordController = TextEditingController();
 
-    final password = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        bool obscurePassword = true;
+    try {
+      final password = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          bool obscurePassword = true;
 
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text(
-                'Account Already Exists',
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Email $googleEmail sudah terdaftar '
-                        'menggunakan Email/Password.',
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Masukkan password akun tersebut '
-                        'untuk menghubungkan Google.',
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: obscurePassword,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: const Icon(
-                        Icons.lock_outline,
-                      ),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: const Text('Account Already Exists'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Email $googleEmail sudah terdaftar '
+                          'menggunakan Email/Password.',
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Masukkan password akun tersebut '
+                          'untuk menghubungkan Google.',
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: obscurePassword,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              obscurePassword = !obscurePassword;
+                            });
+                          },
                         ),
-                        onPressed: () {
-                          setDialogState(() {
-                            obscurePassword = !obscurePassword;
-                          });
-                        },
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Batal'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      final value = passwordController.text;
+                      if (value.isNotEmpty) {
+                        Navigator.pop(dialogContext, value);
+                      }
+                    },
+                    child: const Text('Hubungkan'),
                   ),
                 ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final value = passwordController.text;
+              );
+            },
+          );
+        },
+      );
 
-                    if (value.isNotEmpty) {
-                      Navigator.pop(
-                        context,
-                        value,
-                      );
-                    }
-                  },
-                  child: const Text('Connect'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+      if (password == null || password.isEmpty) return;
 
-    passwordController.dispose();
-
-    if (password == null || password.isEmpty) {
-      return;
-    }
-
-    try {
-      // ----------------------------------------------------------
-      // LOGIN EMAIL/PASSWORD
-      // ----------------------------------------------------------
-
+      // Login terlebih dahulu menggunakan email/password.
       final emailCredential =
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: googleEmail,
@@ -513,47 +467,44 @@ class _LoginScreenState extends State<LoginScreen> {
       final user = emailCredential.user;
 
       if (user == null) {
-        throw FirebaseAuthException(
-          code: 'user-not-found',
-        );
+        throw FirebaseAuthException(code: 'user-not-found');
       }
 
-      // ----------------------------------------------------------
-      // LINK GOOGLE KE AKUN YANG SAMA
-      // ----------------------------------------------------------
+      // Periksa profil SEBELUM menghubungkan Google.
+      // Akun nonaktif tidak boleh melanjutkan proses linking.
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
 
-      await user.linkWithCredential(
-        googleCredential,
-      );
+      if (!userDoc.exists) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage(
+          'Profil akun tidak ditemukan. Hubungi administrator.',
+        );
+        return;
+      }
 
-      // ----------------------------------------------------------
-      // REFRESH USER
-      // ----------------------------------------------------------
+      final data = userDoc.data();
 
+      if (data == null || data['active'] == false) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage(
+          'Akun kamu tidak aktif atau profilnya tidak valid.',
+        );
+        return;
+      }
+
+      await user.linkWithCredential(googleCredential);
       await user.reload();
 
-      final updatedUser =
-          FirebaseAuth.instance.currentUser;
+      final updatedUser = FirebaseAuth.instance.currentUser;
 
       if (updatedUser == null) {
-        throw FirebaseAuthException(
-          code: 'user-not-found',
-        );
+        throw FirebaseAuthException(code: 'user-not-found');
       }
 
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Google berhasil terhubung ke akun kamu.',
-          ),
-        ),
-      );
-
-      // ----------------------------------------------------------
-      // CEK ROLE
-      // ----------------------------------------------------------
+      _showMessage('Google berhasil terhubung ke akun kamu.');
 
       await _loginBasedOnRole(updatedUser);
     } on FirebaseAuthException catch (e) {
@@ -564,78 +515,46 @@ class _LoginScreenState extends State<LoginScreen> {
       switch (e.code) {
         case 'wrong-password':
         case 'invalid-credential':
-          message =
-          'Password salah. Akun Google belum terhubung.';
+          message = 'Password salah. Akun Google belum terhubung.';
           break;
-
         case 'credential-already-in-use':
-          message =
-          'Akun Google tersebut sudah terhubung '
-              'ke akun lain.';
+          message = 'Akun Google sudah terhubung ke akun lain.';
           break;
-
         case 'provider-already-linked':
-          message =
-          'Google sudah terhubung dengan akun ini.';
+          message = 'Google sudah terhubung dengan akun ini.';
           break;
-
         case 'too-many-requests':
-          message =
-          'Terlalu banyak percobaan. Silakan coba lagi nanti.';
+          message = 'Terlalu banyak percobaan. Coba lagi nanti.';
           break;
-
         case 'network-request-failed':
           message = 'Periksa koneksi internet kamu.';
           break;
-
         default:
-          message =
-              e.message ??
-                  'Gagal menghubungkan akun Google.';
+          message = e.message ?? 'Gagal menghubungkan akun Google.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      _showMessage(message);
     } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal menghubungkan akun Google: $e',
-          ),
-        ),
-      );
+      _showMessage('Gagal menghubungkan akun Google: $e');
+    } finally {
+      passwordController.dispose();
     }
   }
 
   // ============================================================
-  // FORGOT PASSWORD
+  // NAVIGASI
   // ============================================================
 
   void _openForgotPassword() {
-    Navigator.pushNamed(
-      context,
-      AppRoutes.forgotPassword,
-    );
+    Navigator.pushNamed(context, AppRoutes.forgotPassword);
   }
-
-  // ============================================================
-  // SIGN UP
-  // ============================================================
 
   void _openSignup() {
-    Navigator.pushNamed(
-      context,
-      AppRoutes.signup,
-    );
+    Navigator.pushNamed(context, AppRoutes.signup);
   }
 
   // ============================================================
-  // UI
+  // UI LOGIN
   // ============================================================
 
   @override
@@ -643,15 +562,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
     final colorScheme = theme.colorScheme;
-
-    final isDark =
-        theme.brightness == Brightness.dark;
-
+    final isDark = theme.brightness == Brightness.dark;
     final size = MediaQuery.sizeOf(context);
 
     final horizontalPadding =
     (size.width * 0.06).clamp(20.0, 32.0);
-
     final logoSize =
     (size.shortestSide * 0.22).clamp(90.0, 130.0);
 
@@ -660,533 +575,291 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 480,
-            ),
+            constraints: const BoxConstraints(maxWidth: 480),
             child: SingleChildScrollView(
               padding: EdgeInsets.symmetric(
                 horizontal: horizontalPadding,
                 vertical: 32,
               ),
-              child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
-                children: [
-                  // =====================================================
-                  // LOGO
-                  // =====================================================
-
-                  Center(
-                    child: Container(
-                      width: logoSize + 30,
-                      height: logoSize + 30,
-                      padding:
-                      const EdgeInsets.all(15),
-                      decoration: BoxDecoration(
-                        color: colorScheme
-                            .surfaceContainerHighest,
-                        borderRadius:
-                        BorderRadius.circular(28),
-                        border: Border.all(
-                          color: colorScheme.outline,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(
-                              isDark ? 0.20 : 0.06,
-                            ),
-                            blurRadius: 20,
-                            offset:
-                            const Offset(0, 8),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: logoSize + 30,
+                        height: logoSize + 30,
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(
+                            color: colorScheme.outline,
                           ),
-                        ],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(
+                                isDark ? 0.20 : 0.06,
+                              ),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          'assets/images/logo-bgr.png',
+                          semanticLabel: 'LMS App Logo',
+                          fit: BoxFit.contain,
+                        ),
                       ),
-                      child: Image.asset(
-                        'assets/images/logo-bgr.png',
-                        semanticLabel:
-                        'LMS App Logo',
-                        fit: BoxFit.contain,
+                    ),
+                    const SizedBox(height: 36),
+                    Text(
+                      'Welcome Back!',
+                      style: textTheme.headlineLarge?.copyWith(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                  ),
-
-                  const SizedBox(height: 36),
-
-                  // =====================================================
-                  // WELCOME
-                  // =====================================================
-
-                  Text(
-                    'Welcome Back!',
-                    style: textTheme
-                        .headlineLarge
-                        ?.copyWith(
-                      color:
-                      colorScheme.onSurface,
-                      fontWeight:
-                      FontWeight.w800,
+                    const SizedBox(height: 8),
+                    Text(
+                      'Login to continue your learning journey',
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 15,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 32),
 
-                  const SizedBox(height: 8),
-
-                  Text(
-                    'Login to continue your learning journey',
-                    style: textTheme.bodyMedium
-                        ?.copyWith(
-                      color: colorScheme
-                          .onSurfaceVariant,
-                      fontSize: 15,
+                    // EMAIL
+                    Text(
+                      'Email Address',
+                      style: textTheme.labelLarge,
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        hintText: 'Enter your email',
+                        prefixIcon: Icon(Icons.email_outlined),
+                      ),
+                      validator: (value) {
+                        final email = value?.trim() ?? '';
+                        if (email.isEmpty) {
+                          return 'Please enter your email';
+                        }
+                        if (!RegExp(
+                          r'^[\w.-]+@([\w-]+\.)+[\w-]{2,}$',
+                        ).hasMatch(email)) {
+                          return 'Enter a valid email address';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 32),
+                    // PASSWORD
+                    Text(
+                      'Password',
+                      style: textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) {
+                        if (!_loading && !_googleLoading) {
+                          _submit();
+                        }
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Enter your password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          tooltip: _obscurePassword
+                              ? 'Show password'
+                              : 'Hide password',
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter password';
+                        }
+                        if (value.length < 6) {
+                          return 'Password must be at least 6 chars';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
 
-                  // =====================================================
-                  // FORM
-                  // =====================================================
-
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                    // REMEMBER ME / FORGOT PASSWORD
+                    Row(
                       children: [
-                        // =================================================
-                        // EMAIL
-                        // =================================================
-
-                        Text(
-                          'Email Address',
-                          style: textTheme
-                              .labelLarge
-                              ?.copyWith(
-                            color:
-                            colorScheme.onSurface,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        TextFormField(
-                          controller:
-                          _emailController,
-                          keyboardType:
-                          TextInputType.emailAddress,
-                          textInputAction:
-                          TextInputAction.next,
-                          decoration:
-                          InputDecoration(
-                            hintText:
-                            'Enter your email',
-                            prefixIcon: Icon(
-                              Icons.email_outlined,
-                              color: colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                          ),
-                          style: TextStyle(
-                            color:
-                            colorScheme.onSurface,
-                          ),
-                          validator: (value) {
-                            if (value == null ||
-                                value.trim().isEmpty) {
-                              return 'Please enter your email';
-                            }
-
-                            final emailRegex =
-                            RegExp(
-                              r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                            );
-
-                            if (!emailRegex.hasMatch(
-                              value.trim(),
-                            )) {
-                              return 'Enter a valid email address';
-                            }
-
-                            return null;
-                          },
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        // =================================================
-                        // PASSWORD
-                        // =================================================
-
-                        Text(
-                          'Password',
-                          style: textTheme
-                              .labelLarge
-                              ?.copyWith(
-                            color:
-                            colorScheme.onSurface,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        TextFormField(
-                          controller:
-                          _passwordController,
-                          obscureText:
-                          _obscurePassword,
-                          textInputAction:
-                          TextInputAction.done,
-                          onFieldSubmitted: (_) {
-                            if (!_loading &&
-                                !_googleLoading) {
-                              _submit();
-                            }
-                          },
-                          decoration:
-                          InputDecoration(
-                            hintText:
-                            'Enter your password',
-                            prefixIcon: Icon(
-                              Icons.lock_outline,
-                              color: colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                            suffixIcon:
-                            IconButton(
-                              tooltip:
-                              _obscurePassword
-                                  ? 'Show password'
-                                  : 'Hide password',
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons
-                                    .visibility_outlined
-                                    : Icons
-                                    .visibility_off_outlined,
-                                color: colorScheme
-                                    .onSurfaceVariant,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword =
-                                  !_obscurePassword;
-                                });
-                              },
-                            ),
-                          ),
-                          style: TextStyle(
-                            color:
-                            colorScheme.onSurface,
-                          ),
-                          validator: (value) {
-                            if (value == null ||
-                                value.isEmpty) {
-                              return 'Please enter password';
-                            }
-
-                            if (value.length < 6) {
-                              return 'Password must be at least 6 chars';
-                            }
-
-                            return null;
-                          },
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // =================================================
-                        // REMEMBER ME + FORGOT
-                        // =================================================
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: Checkbox(
-                                      value:
-                                      _rememberMe,
-                                      activeColor:
-                                      colorScheme
-                                          .primary,
-                                      checkColor:
-                                      colorScheme
-                                          .onPrimary,
-                                      shape:
-                                      RoundedRectangleBorder(
-                                        borderRadius:
-                                        BorderRadius
-                                            .circular(5),
-                                      ),
-                                      onChanged:
-                                      (_loading ||
-                                          _googleLoading)
-                                          ? null
-                                          : (value) {
-                                        setState(() {
-                                          _rememberMe =
-                                              value ??
-                                                  false;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(
-                                    width: 8,
-                                  ),
-                                  Flexible(
-                                    child: Text(
-                                      'Remember me',
-                                      style: textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                        color:
-                                        colorScheme
-                                            .onSurface,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton(
-                              onPressed:
-                              _loading ||
-                                  _googleLoading
-                                  ? null
-                                  : _openForgotPassword,
-                              child: const Text(
-                                'Forgot Password?',
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        // =================================================
-                        // LOGIN BUTTON
-                        // =================================================
-
-                        SizedBox(
-                          width: double.infinity,
-                          height: 54,
-                          child:
-                          ElevatedButton(
-                            onPressed:
-                            _loading ||
-                                _googleLoading
-                                ? null
-                                : _submit,
-                            child:
-                            AnimatedSwitcher(
-                              duration:
-                              const Duration(
-                                milliseconds: 200,
-                              ),
-                              child: _loading
-                                  ? SizedBox(
-                                key:
-                                const ValueKey(
-                                  'loading',
-                                ),
-                                width: 22,
-                                height: 22,
-                                child:
-                                CircularProgressIndicator(
-                                  strokeWidth:
-                                  2.5,
-                                  color:
-                                  colorScheme
-                                      .onPrimary,
-                                ),
-                              )
-                                  : const Text(
-                                'Login',
-                                key:
-                                ValueKey(
-                                  'login',
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 28),
-
-                        // =================================================
-                        // DIVIDER
-                        // =================================================
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Divider(
-                                color: colorScheme
-                                    .outline,
-                              ),
-                            ),
-                            Padding(
-                              padding:
-                              const EdgeInsets
-                                  .symmetric(
-                                horizontal: 16,
-                              ),
-                              child: Text(
-                                'OR',
-                                style: textTheme
-                                    .labelMedium
-                                    ?.copyWith(
-                                  color:
-                                  colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Divider(
-                                color: colorScheme
-                                    .outline,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 24),
-
-                        // =================================================
-                        // GOOGLE LOGIN
-                        // =================================================
-
-                        SizedBox(
-                          width: double.infinity,
-                          height: 54,
-                          child:
-                          OutlinedButton(
-                            onPressed:
-                            _loading ||
-                                _googleLoading
-                                ? null
-                                : _signInWithGoogle,
-                            style:
-                            OutlinedButton
-                                .styleFrom(
-                              side: BorderSide(
-                                color: colorScheme
-                                    .outline,
-                              ),
-                              shape:
-                              RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius
-                                    .circular(14),
-                              ),
-                            ),
-                            child:
-                            AnimatedSwitcher(
-                              duration:
-                              const Duration(
-                                milliseconds: 200,
-                              ),
-                              child:
-                              _googleLoading
-                                  ? SizedBox(
-                                key:
-                                const ValueKey(
-                                  'google_loading',
-                                ),
-                                width: 22,
-                                height: 22,
-                                child:
-                                CircularProgressIndicator(
-                                  strokeWidth:
-                                  2.5,
-                                  color:
-                                  colorScheme
-                                      .primary,
-                                ),
-                              )
-                                  : Row(
-                                key:
-                                const ValueKey(
-                                  'google_button',
-                                ),
-                                mainAxisAlignment:
-                                MainAxisAlignment
-                                    .center,
-                                children: [
-                                  SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child:
-                                    Image.asset(
-                                      'assets/images/google_logo.png',
-                                      fit: BoxFit
-                                          .contain,
-                                    ),
-                                  ),
-                                  const SizedBox(
-                                    width: 12,
-                                  ),
-                                  Text(
-                                    'Continue with Google',
-                                    style:
-                                    TextStyle(
-                                      color:
-                                      colorScheme
-                                          .onSurface,
-                                      fontWeight:
-                                      FontWeight
-                                          .w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 28),
-
-                        // =================================================
-                        // SIGN UP
-                        // =================================================
-
-                        Center(
+                        Expanded(
                           child: Row(
-                            mainAxisAlignment:
-                            MainAxisAlignment
-                                .center,
                             children: [
-                              Text(
-                                "Don't have an account?",
-                                style: textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                  color:
-                                  colorScheme
-                                      .onSurfaceVariant,
+                              SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: Checkbox(
+                                  value: _rememberMe,
+                                  activeColor: colorScheme.primary,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(5),
+                                  ),
+                                  onChanged: (_loading || _googleLoading)
+                                      ? null
+                                      : (value) {
+                                    setState(() {
+                                      _rememberMe = value ?? false;
+                                    });
+                                  },
                                 ),
                               ),
-                              TextButton(
-                                onPressed:
-                                _loading ||
-                                    _googleLoading
-                                    ? null
-                                    : _openSignup,
-                                child: const Text(
-                                  'Sign Up',
-                                ),
+                              const SizedBox(width: 8),
+                              const Flexible(
+                                child: Text('Remember me'),
                               ),
                             ],
                           ),
                         ),
+                        TextButton(
+                          onPressed: (_loading || _googleLoading)
+                              ? null
+                              : _openForgotPassword,
+                          child: const Text('Forgot Password?'),
+                        ),
                       ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 20),
+
+                    // LOGIN BUTTON
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: ElevatedButton(
+                        onPressed: (_loading || _googleLoading)
+                            ? null
+                            : _submit,
+                        child: _loading
+                            ? SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: colorScheme.onPrimary,
+                          ),
+                        )
+                            : const Text('Login'),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+
+                    // DIVIDER
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Divider(color: colorScheme.outline),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                          ),
+                          child: Text(
+                            'OR',
+                            style: textTheme.labelMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Divider(color: colorScheme.outline),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    // GOOGLE BUTTON
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: OutlinedButton(
+                        onPressed: (_loading || _googleLoading)
+                            ? null
+                            : _signInWithGoogle,
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: colorScheme.outline,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: _googleLoading
+                            ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                            : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: Image.asset(
+                                'assets/images/google_logo.png',
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            const Text('Continue with Google'),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+
+                    // SIGN UP
+                    Center(
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            "Don't have an account?",
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: (_loading || _googleLoading)
+                                ? null
+                                : _openSignup,
+                            child: const Text('Sign Up'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
