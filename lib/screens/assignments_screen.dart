@@ -8,6 +8,60 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/cloudinary_service.dart';
 
+// Warna adaptif agar halaman mengikuti ThemeMode terang/gelap aplikasi.
+bool _isDarkMode(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark;
+
+Color _pageBackground(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF111827)
+        : const Color(0xFFF7F8FA);
+
+Color _surfaceColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF1F2937)
+        : Colors.white;
+
+Color _primaryTextColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFFF9FAFB)
+        : const Color(0xFF111827);
+
+Color _secondaryTextColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFFD1D5DB)
+        : const Color(0xFF6B7280);
+
+Color _borderColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF374151)
+        : const Color(0xFFE5E7EB);
+
+Color _softBlueColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF1E3A5F)
+        : const Color(0xFFEFF6FF);
+
+Color _softPrimaryColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF1E3A5F)
+        : const Color(0xFFEFF4FF);
+
+Color _softGreenColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF143D2A)
+        : const Color(0xFFF0FDF4);
+
+Color _softRedColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF4C2227)
+        : const Color(0xFFFEF2F2);
+
+Color _softAmberColor(BuildContext context) =>
+    _isDarkMode(context)
+        ? const Color(0xFF45351B)
+        : const Color(0xFFFFFBEB);
+
 class AssignmentsScreen extends StatefulWidget {
   final String classId;
 
@@ -17,92 +71,61 @@ class AssignmentsScreen extends StatefulWidget {
   });
 
   @override
-  State<AssignmentsScreen> createState() =>
-      _AssignmentsScreenState();
+  State<AssignmentsScreen> createState() => _AssignmentsScreenState();
 }
 
-class _AssignmentsScreenState
-    extends State<AssignmentsScreen> {
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
+class _AssignmentsScreenState extends State<AssignmentsScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FA),
+      backgroundColor: _pageBackground(context),
       appBar: AppBar(
         title: const Text(
           'Tugas',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: _surfaceColor(context),
+        foregroundColor: _primaryTextColor(context),
         elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _firestore
             .collection('assignments')
-            .where(
-          'classId',
-          isEqualTo: widget.classId,
-        )
+            .where('classId', isEqualTo: widget.classId)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return _ErrorState(
-              message:
-              'Gagal memuat tugas.\n${snapshot.error}',
+              message: 'Gagal memuat tugas.\n${snapshot.error}',
             );
           }
 
-          if (snapshot.connectionState ==
-              ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
           }
 
-          final documents =
-              snapshot.data?.docs ?? [];
+          final documents = snapshot.data?.docs ?? [];
 
           if (documents.isEmpty) {
             return const _EmptyState();
           }
 
           final assignments = documents.map((doc) {
-            final data =
-            doc.data() as Map<String, dynamic>;
-
-            return {
-              'id': doc.id,
-              ...data,
-            };
+            final data = doc.data() as Map<String, dynamic>;
+            return {'id': doc.id, ...data};
           }).toList();
 
           assignments.sort((a, b) {
-            final Timestamp? dateA =
-            _timestampFrom(a['dueDate']);
+            final Timestamp? dateA = _timestampFrom(a['dueDate']);
+            final Timestamp? dateB = _timestampFrom(b['dueDate']);
 
-            final Timestamp? dateB =
-            _timestampFrom(b['dueDate']);
+            if (dateA == null && dateB == null) return 0;
+            if (dateA == null) return 1;
+            if (dateB == null) return -1;
 
-            if (dateA == null && dateB == null) {
-              return 0;
-            }
-
-            if (dateA == null) {
-              return 1;
-            }
-
-            if (dateB == null) {
-              return -1;
-            }
-
-            return dateA
-                .toDate()
-                .compareTo(dateB.toDate());
+            return dateA.toDate().compareTo(dateB.toDate());
           });
 
           return RefreshIndicator(
@@ -110,27 +133,19 @@ class _AssignmentsScreenState
               setState(() {});
             },
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                32,
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               itemCount: assignments.length,
               itemBuilder: (context, index) {
-                final assignment =
-                assignments[index];
-
+                final assignment = assignments[index];
                 return _AssignmentCard(
                   assignment: assignment,
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            AssignmentDetailScreen(
-                              assignment: assignment,
-                            ),
+                        builder: (_) => AssignmentDetailScreen(
+                          assignment: assignment,
+                        ),
                       ),
                     );
                   },
@@ -143,17 +158,9 @@ class _AssignmentsScreenState
     );
   }
 
-  static Timestamp? _timestampFrom(
-      dynamic value,
-      ) {
-    if (value is Timestamp) {
-      return value;
-    }
-
-    if (value is DateTime) {
-      return Timestamp.fromDate(value);
-    }
-
+  static Timestamp? _timestampFrom(dynamic value) {
+    if (value is Timestamp) return value;
+    if (value is DateTime) return Timestamp.fromDate(value);
     return null;
   }
 }
@@ -173,46 +180,26 @@ class _AssignmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String title =
-    (assignment['title'] ?? 'Tanpa Judul')
-        .toString();
+    final String title = (assignment['title'] ?? 'Tanpa Judul').toString();
+    final String courseTitle = (assignment['courseTitle'] ?? '-').toString();
+    final String teacherName = (assignment['teacherName'] ?? '-').toString();
+    final String description = (assignment['description'] ?? '').toString();
+    final int points = _parseInt(assignment['points']);
 
-    final String courseTitle =
-    (assignment['courseTitle'] ?? '-')
-        .toString();
-
-    final String teacherName =
-    (assignment['teacherName'] ?? '-')
-        .toString();
-
-    final String description =
-    (assignment['description'] ?? '')
-        .toString();
-
-    final int points =
-    _parseInt(assignment['points']);
-
-    final Timestamp? dueDate =
-    assignment['dueDate'] is Timestamp
+    final Timestamp? dueDate = assignment['dueDate'] is Timestamp
         ? assignment['dueDate'] as Timestamp
         : null;
-
-    final DateTime? dueDateTime =
-    dueDate?.toDate();
-
-    final bool isOverdue =
-        dueDateTime != null &&
-            DateTime.now().isAfter(dueDateTime);
+    final DateTime? dueDateTime = dueDate?.toDate();
+    final bool isOverdue = dueDateTime != null &&
+        DateTime.now().isAfter(dueDateTime);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
       elevation: 0,
-      color: Colors.white,
+      color: _surfaceColor(context),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(
-          color: Colors.grey.shade200,
-        ),
+        side: BorderSide(color: _borderColor(context)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -220,21 +207,17 @@ class _AssignmentCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color:
-                      const Color(0xFFEFF4FF),
-                      borderRadius:
-                      BorderRadius.circular(14),
+                      color: _softPrimaryColor(context),
+                      borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Icon(
                       Icons.assignment_outlined,
@@ -244,34 +227,27 @@ class _AssignmentCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           title,
                           maxLines: 2,
-                          overflow:
-                          TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
                             fontSize: 16,
-                            fontWeight:
-                            FontWeight.w700,
-                            color:
-                            Color(0xFF111827),
+                            fontWeight: FontWeight.w700,
+                            color: _primaryTextColor(context),
                           ),
                         ),
                         const SizedBox(height: 5),
                         Text(
                           courseTitle,
                           maxLines: 1,
-                          overflow:
-                          TextOverflow.ellipsis,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 13,
-                            color:
-                            Colors.grey.shade600,
-                            fontWeight:
-                            FontWeight.w500,
+                            color: _secondaryTextColor(context),
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
@@ -279,9 +255,7 @@ class _AssignmentCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   _StatusBadge(
-                    text: isOverdue
-                        ? 'Lewat'
-                        : 'Aktif',
+                    text: isOverdue ? 'Lewat' : 'Aktif',
                     color: isOverdue
                         ? const Color(0xFFDC2626)
                         : const Color(0xFF16A34A),
@@ -293,45 +267,33 @@ class _AssignmentCard extends StatelessWidget {
                 Text(
                   description,
                   maxLines: 2,
-                  overflow:
-                  TextOverflow.ellipsis,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13,
                     height: 1.5,
-                    color:
-                    Colors.grey.shade700,
+                    color: _secondaryTextColor(context),
                   ),
                 ),
-              if (description.isNotEmpty)
-                const SizedBox(height: 14),
-              Divider(
-                height: 1,
-                color: Colors.grey.shade200,
-              ),
+              if (description.isNotEmpty) const SizedBox(height: 14),
+              Divider(height: 1, color: Colors.grey.shade200),
               const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
                     child: _InfoItem(
-                      icon:
-                      Icons.person_outline,
+                      icon: Icons.person_outline,
                       label: teacherName,
                     ),
                   ),
                   Expanded(
                     child: _InfoItem(
-                      icon: Icons
-                          .calendar_today_outlined,
+                      icon: Icons.calendar_today_outlined,
                       label: dueDateTime == null
                           ? 'Tidak ada deadline'
-                          : _formatDate(
-                        dueDateTime,
-                      ),
+                          : _formatDate(dueDateTime),
                     ),
                   ),
-                  _PointsBadge(
-                    points: points,
-                  ),
+                  _PointsBadge(points: points),
                 ],
               ),
             ],
@@ -342,18 +304,9 @@ class _AssignmentCard extends StatelessWidget {
   }
 
   static int _parseInt(dynamic value) {
-    if (value is int) {
-      return value;
-    }
-
-    if (value is double) {
-      return value.toInt();
-    }
-
-    return int.tryParse(
-      value?.toString() ?? '',
-    ) ??
-        0;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 }
 
@@ -361,8 +314,7 @@ class _AssignmentCard extends StatelessWidget {
 // ASSIGNMENT DETAIL
 // ============================================================
 
-class AssignmentDetailScreen
-    extends StatefulWidget {
+class AssignmentDetailScreen extends StatefulWidget {
   final Map<String, dynamic> assignment;
 
   const AssignmentDetailScreen({
@@ -371,211 +323,115 @@ class AssignmentDetailScreen
   });
 
   @override
-  State<AssignmentDetailScreen> createState() =>
-      _AssignmentDetailScreenState();
+  State<AssignmentDetailScreen> createState() => _AssignmentDetailScreenState();
 }
 
-class _AssignmentDetailScreenState
-    extends State<AssignmentDetailScreen> {
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
+class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  User? get _user =>
-      FirebaseAuth.instance.currentUser;
+  User? get _user => FirebaseAuth.instance.currentUser;
 
   bool _uploading = false;
-
   PlatformFile? _selectedFile;
 
-  static const int _maxFileSize =
-      10 * 1024 * 1024;
+  static const int _maxFileSize = 10 * 1024 * 1024;
 
-  String get assignmentId =>
-      (widget.assignment['id'] ?? '')
-          .toString();
-
+  String get assignmentId => (widget.assignment['id'] ?? '').toString();
   String get assignmentTitle =>
-      (widget.assignment['title'] ??
-          'Tanpa Judul')
-          .toString();
-
+      (widget.assignment['title'] ?? 'Tanpa Judul').toString();
   String get courseTitle =>
-      (widget.assignment['courseTitle'] ??
-          '-')
-          .toString();
-
+      (widget.assignment['courseTitle'] ?? '-').toString();
   String get teacherName =>
-      (widget.assignment['teacherName'] ??
-          '-')
-          .toString();
-
+      (widget.assignment['teacherName'] ?? '-').toString();
   String get description =>
-      (widget.assignment['description'] ?? '')
-          .toString();
-
+      (widget.assignment['description'] ?? '').toString();
   String get instructions =>
-      (widget.assignment['instructions'] ?? '')
-          .toString();
+      (widget.assignment['instructions'] ?? '').toString();
 
-  int get points =>
-      _parseInt(widget.assignment['points']);
+  int get points => _parseInt(widget.assignment['points']);
 
-  // ==========================================================
-  // DOKUMEN TUGAS DARI GURU
-  // ==========================================================
-
+  // Dokumen tugas dari guru.
   String get teacherDocumentUrl {
     final attachmentUrl =
-    (widget.assignment['attachmentUrl'] ??
-        '')
-        .toString()
-        .trim();
+    (widget.assignment['attachmentUrl'] ?? '').toString().trim();
+    if (attachmentUrl.isNotEmpty) return attachmentUrl;
 
-    if (attachmentUrl.isNotEmpty) {
-      return attachmentUrl;
-    }
-
-    final fileUrl =
-    (widget.assignment['fileUrl'] ?? '')
-        .toString()
-        .trim();
-
-    return fileUrl;
+    return (widget.assignment['fileUrl'] ?? '').toString().trim();
   }
 
   String get teacherDocumentFileName {
-    final fileName =
-    (widget.assignment['fileName'] ??
-        '')
-        .toString()
-        .trim();
-
-    if (fileName.isNotEmpty) {
-      return fileName;
-    }
+    final fileName = (widget.assignment['fileName'] ?? '').toString().trim();
+    if (fileName.isNotEmpty) return fileName;
 
     final attachmentName =
-    (widget.assignment[
-    'attachmentFileName'] ??
-        '')
-        .toString()
-        .trim();
-
-    if (attachmentName.isNotEmpty) {
-      return attachmentName;
-    }
+    (widget.assignment['attachmentFileName'] ?? '').toString().trim();
+    if (attachmentName.isNotEmpty) return attachmentName;
 
     return 'Dokumen tugas';
   }
 
-  bool get hasTeacherDocument {
-    return teacherDocumentUrl.isNotEmpty;
-  }
+  bool get hasTeacherDocument => teacherDocumentUrl.isNotEmpty;
 
   DateTime? get dueDate {
-    final value =
-    widget.assignment['dueDate'];
-
-    if (value is Timestamp) {
-      return value.toDate();
-    }
-
-    if (value is DateTime) {
-      return value;
-    }
-
+    final value = widget.assignment['dueDate'];
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
     return null;
   }
 
   bool get isOverdue {
     final date = dueDate;
-
-    if (date == null) {
-      return false;
-    }
-
+    if (date == null) return false;
     return DateTime.now().isAfter(date);
   }
 
-  DocumentReference<Map<String, dynamic>>?
-  get _submissionReference {
+  DocumentReference<Map<String, dynamic>>? get _submissionReference {
     final user = _user;
-
-    if (user == null ||
-        assignmentId.isEmpty) {
-      return null;
-    }
+    if (user == null || assignmentId.isEmpty) return null;
 
     return _firestore
         .collection('users')
         .doc(user.uid)
-        .collection(
-      'assignment_submissions',
-    )
+        .collection('assignment_submissions')
         .doc(assignmentId);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-      const Color(0xFFF7F8FA),
+      backgroundColor: _pageBackground(context),
       appBar: AppBar(
         title: const Text(
           'Detail Tugas',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: _surfaceColor(context),
+        foregroundColor: _primaryTextColor(context),
         elevation: 0,
       ),
-      body: StreamBuilder<
-          DocumentSnapshot<
-              Map<String, dynamic>>>(
-        stream:
-        _submissionReference?.snapshots(),
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: _submissionReference?.snapshots(),
         builder: (context, snapshot) {
-          final submission =
-          snapshot.data?.data();
+          final submission = snapshot.data?.data();
 
           return ListView(
-            padding:
-            const EdgeInsets.fromLTRB(
-              16,
-              16,
-              16,
-              32,
-            ),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
               _buildHeaderCard(),
               const SizedBox(height: 14),
-
               _buildInformationCard(),
               const SizedBox(height: 14),
-
               _buildDescriptionCard(),
-
               if (instructions.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 _buildInstructionsCard(),
               ],
-
-              // ==================================================
-              // DOKUMEN DARI GURU
-              // ==================================================
-
               if (hasTeacherDocument) ...[
                 const SizedBox(height: 14),
                 _buildTeacherDocumentCard(),
               ],
-
               const SizedBox(height: 14),
-
-              _buildSubmissionCard(
-                submission: submission,
-              ),
+              _buildSubmissionCard(submission: submission),
             ],
           );
         },
@@ -583,26 +439,18 @@ class _AssignmentDetailScreenState
     );
   }
 
-  // ==========================================================
-  // HEADER
-  // ==========================================================
-
   Widget _buildHeaderCard() {
     final bool overdue = isOverdue;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        color: _surfaceColor(context),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _borderColor(context)),
       ),
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
@@ -610,29 +458,24 @@ class _AssignmentDetailScreenState
                 width: 54,
                 height: 54,
                 decoration: BoxDecoration(
-                  color:
-                  const Color(0xFFEFF4FF),
-                  borderRadius:
-                  BorderRadius.circular(16),
+                  color: _softPrimaryColor(context),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: const Icon(
                   Icons.assignment_rounded,
                   size: 28,
-                  color:
-                  Color(0xFF2563EB),
+                  color: Color(0xFF2563EB),
                 ),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   assignmentTitle,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 20,
                     height: 1.25,
-                    fontWeight:
-                    FontWeight.w800,
-                    color:
-                    Color(0xFF111827),
+                    fontWeight: FontWeight.w800,
+                    color: _primaryTextColor(context),
                   ),
                 ),
               ),
@@ -643,10 +486,8 @@ class _AssignmentDetailScreenState
             courseTitle,
             style: const TextStyle(
               fontSize: 14,
-              fontWeight:
-              FontWeight.w600,
-              color:
-              Color(0xFF2563EB),
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF2563EB),
             ),
           ),
           const SizedBox(height: 6),
@@ -655,8 +496,7 @@ class _AssignmentDetailScreenState
               Icon(
                 Icons.person_outline,
                 size: 16,
-                color:
-                Colors.grey.shade600,
+                color: _secondaryTextColor(context),
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -664,8 +504,7 @@ class _AssignmentDetailScreenState
                   teacherName,
                   style: TextStyle(
                     fontSize: 13,
-                    color:
-                    Colors.grey.shade600,
+                    color: _secondaryTextColor(context),
                   ),
                 ),
               ),
@@ -673,26 +512,19 @@ class _AssignmentDetailScreenState
           ),
           const SizedBox(height: 16),
           Container(
-            padding:
-            const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 10,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: overdue
                   ? const Color(0xFFFEF2F2)
                   : const Color(0xFFF0FDF4),
-              borderRadius:
-              BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
                 Icon(
                   overdue
-                      ? Icons
-                      .warning_amber_rounded
-                      : Icons
-                      .schedule_outlined,
+                      ? Icons.warning_amber_rounded
+                      : Icons.schedule_outlined,
                   size: 19,
                   color: overdue
                       ? const Color(0xFFDC2626)
@@ -708,15 +540,10 @@ class _AssignmentDetailScreenState
                         : 'Batas pengumpulan: ${_formatDateTime(dueDate!)}',
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight:
-                      FontWeight.w600,
+                      fontWeight: FontWeight.w600,
                       color: overdue
-                          ? const Color(
-                        0xFFDC2626,
-                      )
-                          : const Color(
-                        0xFF15803D,
-                      ),
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFF15803D),
                     ),
                   ),
                 ),
@@ -728,10 +555,6 @@ class _AssignmentDetailScreenState
     );
   }
 
-  // ==========================================================
-  // INFORMATION
-  // ==========================================================
-
   Widget _buildInformationCard() {
     return _SectionCard(
       title: 'Informasi Tugas',
@@ -739,55 +562,39 @@ class _AssignmentDetailScreenState
       child: Column(
         children: [
           _DetailRow(
-            icon:
-            Icons.menu_book_outlined,
+            icon: Icons.menu_book_outlined,
             label: 'Mata Pelajaran',
             value: courseTitle,
           ),
           const SizedBox(height: 12),
           _DetailRow(
-            icon:
-            Icons.person_outline,
+            icon: Icons.person_outline,
             label: 'Guru',
             value: teacherName,
           ),
           const SizedBox(height: 12),
           _DetailRow(
-            icon:
-            Icons.stars_outlined,
+            icon: Icons.stars_outlined,
             label: 'Poin',
             value: '$points poin',
           ),
           const SizedBox(height: 12),
           _DetailRow(
-            icon:
-            Icons.event_outlined,
-            label:
-            'Batas Pengumpulan',
-            value: dueDate == null
-                ? '-'
-                : _formatDateTime(
-              dueDate!,
-            ),
+            icon: Icons.event_outlined,
+            label: 'Batas Pengumpulan',
+            value: dueDate == null ? '-' : _formatDateTime(dueDate!),
           ),
         ],
       ),
     );
   }
 
-  // ==========================================================
-  // DESCRIPTION
-  // ==========================================================
-
   Widget _buildDescriptionCard() {
     return _SectionCard(
       title: 'Deskripsi',
-      icon:
-      Icons.description_outlined,
+      icon: Icons.description_outlined,
       child: Text(
-        description.isEmpty
-            ? 'Tidak ada deskripsi.'
-            : description,
+        description.isEmpty ? 'Tidak ada deskripsi.' : description,
         style: TextStyle(
           fontSize: 14,
           height: 1.6,
@@ -799,10 +606,6 @@ class _AssignmentDetailScreenState
     );
   }
 
-  // ==========================================================
-  // INSTRUCTIONS
-  // ==========================================================
-
   Widget _buildInstructionsCard() {
     return _SectionCard(
       title: 'Instruksi Pengerjaan',
@@ -812,87 +615,67 @@ class _AssignmentDetailScreenState
         style: TextStyle(
           fontSize: 14,
           height: 1.6,
-          color: Colors.grey.shade800,
+          color: _secondaryTextColor(context),
         ),
       ),
     );
   }
 
-  // ==========================================================
-  // DOKUMEN TUGAS GURU
-  // ==========================================================
-
   Widget _buildTeacherDocumentCard() {
-    final fileName =
-        teacherDocumentFileName;
+    final fileName = teacherDocumentFileName;
 
     return _SectionCard(
       title: 'Dokumen Tugas',
       icon: Icons.attach_file_rounded,
       child: Container(
         width: double.infinity,
-        padding:
-        const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFEFF6FF),
-          borderRadius:
-          BorderRadius.circular(14),
-          border: Border.all(
-            color: const Color(0xFFBFDBFE),
-          ),
+          color: _softBlueColor(context),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFBFDBFE)),
         ),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius:
-                    BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     _getFileIcon(fileName),
-                    color:
-                    const Color(0xFF2563EB),
+                    color: const Color(0xFF2563EB),
                     size: 23,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
                         'File dari Guru',
                         style: TextStyle(
                           fontSize: 12,
-                          color:
-                          Color(0xFF64748B),
-                          fontWeight:
-                          FontWeight.w500,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         fileName,
                         maxLines: 2,
-                        overflow:
-                        TextOverflow.ellipsis,
-                        style:
-                        const TextStyle(
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
                           fontSize: 14,
-                          fontWeight:
-                          FontWeight.w700,
-                          color:
-                          Color(0xFF111827),
+                          fontWeight: FontWeight.w700,
+                          color: _primaryTextColor(context),
                         ),
                       ),
                     ],
@@ -900,40 +683,20 @@ class _AssignmentDetailScreenState
                 ),
               ],
             ),
-
             const SizedBox(height: 14),
-
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed:
-                    () => _openFile(
-                  teacherDocumentUrl,
-                ),
-                icon: const Icon(
-                  Icons.open_in_new,
-                  size: 18,
-                ),
-                label: const Text(
-                  'Lihat Dokumen Tugas',
-                ),
-                style:
-                ElevatedButton.styleFrom(
-                  backgroundColor:
-                  const Color(0xFF2563EB),
-                  foregroundColor:
-                  Colors.white,
-                  padding:
-                  const EdgeInsets.symmetric(
-                    vertical: 13,
-                  ),
+                onPressed: () => _openFile(teacherDocumentUrl),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Lihat Dokumen Tugas'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
                   elevation: 0,
-                  shape:
-                  RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(
-                      11,
-                    ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(11),
                   ),
                 ),
               ),
@@ -944,46 +707,22 @@ class _AssignmentDetailScreenState
     );
   }
 
-  // ==========================================================
-  // SUBMISSION
-  // ==========================================================
+  Widget _buildSubmissionCard({required Map<String, dynamic>? submission}) {
+    final bool submitted = submission != null;
+    final String fileName = (submission?['fileName'] ?? '').toString();
+    final String fileUrl = (submission?['fileUrl'] ?? '').toString();
+    final dynamic rawSize = submission?['fileSize'] ?? submission?['size'];
+    final int fileSize = _parseInt(rawSize);
 
-  Widget _buildSubmissionCard({
-    required Map<String, dynamic>?
-    submission,
-  }) {
-    final bool submitted =
-        submission != null;
-
-    final String fileName =
-    (submission?['fileName'] ?? '')
-        .toString();
-
-    final String fileUrl =
-    (submission?['fileUrl'] ?? '')
-        .toString();
-
-    final dynamic rawSize =
-        submission?['fileSize'] ??
-            submission?['size'];
-
-    final int fileSize =
-    _parseInt(rawSize);
-
-    final Timestamp? submittedAt =
-    submission?['submittedAt']
-    is Timestamp
-        ? submission!['submittedAt']
-    as Timestamp
+    final Timestamp? submittedAt = submission?['submittedAt'] is Timestamp
+        ? submission!['submittedAt'] as Timestamp
         : null;
 
     return _SectionCard(
       title: 'Pengumpulan Tugas',
-      icon:
-      Icons.upload_file_outlined,
+      icon: Icons.upload_file_outlined,
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (submitted)
             _buildSubmittedFile(
@@ -994,72 +733,40 @@ class _AssignmentDetailScreenState
             )
           else
             _buildNotSubmitted(),
-
           const SizedBox(height: 16),
-
-          if (_selectedFile != null)
-            _buildSelectedFile(),
-
-          if (_selectedFile != null)
-            const SizedBox(height: 12),
-
+          if (_selectedFile != null) _buildSelectedFile(),
+          if (_selectedFile != null) const SizedBox(height: 12),
           if (!isOverdue) ...[
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed:
-                _uploading
-                    ? null
-                    : _pickFile,
-                icon: const Icon(
-                  Icons.attach_file,
-                ),
-                label: Text(
-                  submitted
-                      ? 'Ganti File'
-                      : 'Pilih File',
-                ),
-                style:
-                OutlinedButton.styleFrom(
-                  padding:
-                  const EdgeInsets
-                      .symmetric(
-                    vertical: 14,
-                  ),
-                  shape:
-                  RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(
-                      12,
-                    ),
+                onPressed: _uploading ? null : _pickFile,
+                icon: const Icon(Icons.attach_file),
+                label: Text(submitted ? 'Ganti File' : 'Pilih File'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
             ),
-
             if (_selectedFile != null) ...[
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _uploading
-                      ? null
-                      : _submitAssignment,
+                  onPressed: _uploading ? null : _submitAssignment,
                   icon: _uploading
                       ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child:
-                    CircularProgressIndicator(
+                    child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color:
-                      Colors.white,
+                      color: Colors.white,
                     ),
                   )
-                      : const Icon(
-                    Icons
-                        .cloud_upload_outlined,
-                  ),
+                      : const Icon(Icons.cloud_upload_outlined),
                   label: Text(
                     _uploading
                         ? 'Mengunggah...'
@@ -1067,25 +774,12 @@ class _AssignmentDetailScreenState
                         ? 'Kirim Penggantian'
                         : 'Kumpulkan Tugas',
                   ),
-                  style:
-                  ElevatedButton.styleFrom(
-                    backgroundColor:
-                    const Color(
-                      0xFF2563EB,
-                    ),
-                    foregroundColor:
-                    Colors.white,
-                    padding:
-                    const EdgeInsets
-                        .symmetric(
-                      vertical: 14,
-                    ),
-                    shape:
-                    RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                 ),
@@ -1094,64 +788,44 @@ class _AssignmentDetailScreenState
           ] else
             Container(
               width: double.infinity,
-              padding:
-              const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color:
-                const Color(0xFFFEF2F2),
-                borderRadius:
-                BorderRadius.circular(12),
+                color: _softRedColor(context),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: const Row(
                 children: [
-                  Icon(
-                    Icons
-                        .lock_clock_outlined,
-                    color:
-                    Color(0xFFDC2626),
-                  ),
+                  Icon(Icons.lock_clock_outlined, color: Color(0xFFDC2626)),
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Batas pengumpulan tugas sudah lewat.',
                       style: TextStyle(
-                        color:
-                        Color(0xFFB91C1C),
-                        fontWeight:
-                        FontWeight.w600,
+                        color: Color(0xFFB91C1C),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-
-          if (submitted &&
-              !isOverdue) ...[
+          if (submitted && !isOverdue) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: TextButton.icon(
-                onPressed:
-                _uploading
+                onPressed: _uploading
                     ? null
-                    : () =>
-                    _deleteSubmission(
-                      fileName:
-                      fileName,
-                    ),
+                    : () => _deleteSubmission(fileName: fileName),
                 icon: const Icon(
                   Icons.delete_outline,
-                  color:
-                  Color(0xFFDC2626),
+                  color: Color(0xFFDC2626),
                 ),
                 label: const Text(
                   'Hapus Pengumpulan',
                   style: TextStyle(
-                    color:
-                    Color(0xFFDC2626),
-                    fontWeight:
-                    FontWeight.w600,
+                    color: Color(0xFFDC2626),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -1165,35 +839,22 @@ class _AssignmentDetailScreenState
   Widget _buildNotSubmitted() {
     return Container(
       width: double.infinity,
-      padding:
-      const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color:
-        const Color(0xFFFFFBEB),
-        borderRadius:
-        BorderRadius.circular(14),
-        border: Border.all(
-          color:
-          const Color(0xFFFDE68A),
-        ),
+        color: _softAmberColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFDE68A)),
       ),
       child: const Row(
         children: [
-          Icon(
-            Icons
-                .pending_actions_outlined,
-            color:
-            Color(0xFFD97706),
-          ),
+          Icon(Icons.pending_actions_outlined, color: Color(0xFFD97706)),
           SizedBox(width: 10),
           Expanded(
             child: Text(
               'Tugas belum dikumpulkan.',
               style: TextStyle(
-                color:
-                Color(0xFF92400E),
-                fontWeight:
-                FontWeight.w600,
+                color: Color(0xFF92400E),
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -1210,97 +871,64 @@ class _AssignmentDetailScreenState
   }) {
     return Container(
       width: double.infinity,
-      padding:
-      const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color:
-        const Color(0xFFF0FDF4),
-        borderRadius:
-        BorderRadius.circular(14),
-        border: Border.all(
-          color:
-          const Color(0xFFBBF7D0),
-        ),
+        color: _softGreenColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
       ),
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(
             children: [
-              Icon(
-                Icons.check_circle,
-                color:
-                Color(0xFF16A34A),
-              ),
+              Icon(Icons.check_circle, color: Color(0xFF16A34A)),
               SizedBox(width: 8),
               Text(
                 'Sudah Dikumpulkan',
                 style: TextStyle(
-                  fontWeight:
-                  FontWeight.w700,
-                  color:
-                  Color(0xFF15803D),
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF15803D),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
           Row(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Icon(
-                Icons
-                    .insert_drive_file_outlined,
-                color:
-                Color(0xFF2563EB),
+                Icons.insert_drive_file_outlined,
+                color: Color(0xFF2563EB),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      fileName.isEmpty
-                          ? 'File pengumpulan'
-                          : fileName,
+                      fileName.isEmpty ? 'File pengumpulan' : fileName,
                       maxLines: 2,
-                      overflow:
-                      TextOverflow.ellipsis,
-                      style:
-                      const TextStyle(
-                        fontWeight:
-                        FontWeight.w600,
-                      ),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     if (fileSize > 0) ...[
-                      const SizedBox(
-                        height: 4,
-                      ),
+                      const SizedBox(height: 4),
                       Text(
-                        _formatFileSize(
-                          fileSize,
-                        ),
+                        _formatFileSize(fileSize),
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors
-                              .grey.shade600,
+                          color: _secondaryTextColor(context),
                         ),
                       ),
                     ],
-                    if (submittedAt !=
-                        null) ...[
-                      const SizedBox(
-                        height: 4,
-                      ),
+                    if (submittedAt != null) ...[
+                      const SizedBox(height: 4),
                       Text(
                         'Dikumpulkan ${_formatDateTime(submittedAt.toDate())}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors
-                              .grey.shade600,
+                          color: _secondaryTextColor(context),
                         ),
                       ),
                     ],
@@ -1314,31 +942,14 @@ class _AssignmentDetailScreenState
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: () =>
-                    _openFile(fileUrl),
-                icon: const Icon(
-                  Icons.open_in_new,
-                  size: 18,
-                ),
-                label:
-                const Text('Lihat File'),
-                style:
-                OutlinedButton.styleFrom(
-                  foregroundColor:
-                  const Color(
-                    0xFF2563EB,
-                  ),
-                  padding:
-                  const EdgeInsets
-                      .symmetric(
-                    vertical: 12,
-                  ),
-                  shape:
-                  RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
+                onPressed: () => _openFile(fileUrl),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Lihat File'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF2563EB),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
               ),
@@ -1349,70 +960,44 @@ class _AssignmentDetailScreenState
     );
   }
 
-  // ==========================================================
-  // SELECTED FILE
-  // ==========================================================
-
   Widget _buildSelectedFile() {
     final file = _selectedFile!;
 
     return FutureBuilder<int>(
       future: _getSelectedFileSize(file),
       builder: (context, snapshot) {
-        final int fileSize =
-            snapshot.data ?? 0;
+        final int fileSize = snapshot.data ?? 0;
 
         return Container(
           width: double.infinity,
-          padding:
-          const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color:
-            const Color(0xFFEFF6FF),
-            borderRadius:
-            BorderRadius.circular(12),
-            border: Border.all(
-              color:
-              const Color(0xFFBFDBFE),
-            ),
+            color: _softBlueColor(context),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFBFDBFE)),
           ),
           child: Row(
             children: [
-              const Icon(
-                Icons.attach_file,
-                color:
-                Color(0xFF2563EB),
-              ),
+              const Icon(Icons.attach_file, color: Color(0xFF2563EB)),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       file.name,
                       maxLines: 2,
-                      overflow:
-                      TextOverflow.ellipsis,
-                      style:
-                      const TextStyle(
-                        fontWeight:
-                        FontWeight.w600,
-                      ),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      snapshot.connectionState ==
-                          ConnectionState
-                              .waiting
+                      snapshot.connectionState == ConnectionState.waiting
                           ? 'Menghitung ukuran...'
-                          : _formatFileSize(
-                        fileSize,
-                      ),
+                          : _formatFileSize(fileSize),
                       style: TextStyle(
                         fontSize: 12,
-                        color:
-                        Colors.grey.shade600,
+                        color: _secondaryTextColor(context),
                       ),
                     ),
                   ],
@@ -1423,12 +1008,10 @@ class _AssignmentDetailScreenState
                     ? null
                     : () {
                   setState(() {
-                    _selectedFile =
-                    null;
+                    _selectedFile = null;
                   });
                 },
-                icon:
-                const Icon(Icons.close),
+                icon: const Icon(Icons.close),
               ),
             ],
           ),
@@ -1437,20 +1020,12 @@ class _AssignmentDetailScreenState
     );
   }
 
-  Future<int> _getSelectedFileSize(
-      PlatformFile file,
-      ) async {
+  Future<int> _getSelectedFileSize(PlatformFile file) async {
     final path = file.path;
-
-    if (path == null || path.isEmpty) {
-      return 0;
-    }
+    if (path == null || path.isEmpty) return 0;
 
     final localFile = File(path);
-
-    if (!await localFile.exists()) {
-      return 0;
-    }
+    if (!await localFile.exists()) return 0;
 
     return localFile.length();
   }
@@ -1459,10 +1034,10 @@ class _AssignmentDetailScreenState
   // PICK FILE
   // ==========================================================
 
+
   Future<void> _pickFile() async {
     try {
-      final result =
-      await FilePicker.pickFile(
+      final List<PlatformFile> result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: [
           'pdf',
@@ -1480,61 +1055,44 @@ class _AssignmentDetailScreenState
         ],
       );
 
-      if (result == null) {
-        return;
-      }
+      if (result.isEmpty) return;
 
-      if (result.path == null ||
-          result.path!.isEmpty) {
+      final pickedFile = result.first;
+      final path = pickedFile.path;
+
+      if (path == null || path.isEmpty) {
         if (!mounted) return;
-
-        _showSnackBar(
-          'File tidak dapat diakses.',
-          isError: true,
-        );
+        _showSnackBar('File tidak dapat diakses.', isError: true);
         return;
       }
 
-      final localFile =
-      File(result.path!);
+      final localFile = File(path);
 
       if (!await localFile.exists()) {
         if (!mounted) return;
-
-        _showSnackBar(
-          'File tidak ditemukan.',
-          isError: true,
-        );
+        _showSnackBar('File tidak ditemukan.', isError: true);
         return;
       }
 
-      final fileSize =
-      await localFile.length();
+      final fileSize = await localFile.length();
 
       if (fileSize > _maxFileSize) {
         if (!mounted) return;
-
-        _showSnackBar(
-          'Ukuran file maksimal 10 MB.',
-          isError: true,
-        );
+        _showSnackBar('Ukuran file maksimal 10 MB.', isError: true);
         return;
       }
 
       if (!mounted) return;
 
       setState(() {
-        _selectedFile = result;
+        _selectedFile = pickedFile;
       });
     } catch (e) {
       if (!mounted) return;
-
-      _showSnackBar(
-        'Gagal memilih file: $e',
-        isError: true,
-      );
+      _showSnackBar('Gagal memilih file: $e', isError: true);
     }
   }
+
 
   // ==========================================================
   // SUBMIT
@@ -1544,168 +1102,86 @@ class _AssignmentDetailScreenState
     final user = _user;
 
     if (user == null) {
-      _showSnackBar(
-        'Silakan login terlebih dahulu.',
-        isError: true,
-      );
+      _showSnackBar('Silakan login terlebih dahulu.', isError: true);
       return;
     }
 
     if (_selectedFile == null) {
-      _showSnackBar(
-        'Pilih file terlebih dahulu.',
-        isError: true,
-      );
+      _showSnackBar('Pilih file terlebih dahulu.', isError: true);
       return;
     }
 
     if (isOverdue) {
-      _showSnackBar(
-        'Batas pengumpulan tugas sudah lewat.',
-        isError: true,
-      );
+      _showSnackBar('Batas pengumpulan tugas sudah lewat.', isError: true);
       return;
     }
 
-    final path =
-        _selectedFile!.path;
-
+    final path = _selectedFile!.path;
     if (path == null || path.isEmpty) {
-      _showSnackBar(
-        'File tidak dapat diakses.',
-        isError: true,
-      );
+      _showSnackBar('File tidak dapat diakses.', isError: true);
       return;
     }
 
     final localFile = File(path);
-
     if (!await localFile.exists()) {
-      _showSnackBar(
-        'File tidak ditemukan.',
-        isError: true,
-      );
+      _showSnackBar('File tidak ditemukan.', isError: true);
       return;
     }
 
-    final actualFileSize =
-    await localFile.length();
-
+    final actualFileSize = await localFile.length();
     if (actualFileSize > _maxFileSize) {
-      _showSnackBar(
-        'Ukuran file maksimal 10 MB.',
-        isError: true,
-      );
+      _showSnackBar('Ukuran file maksimal 10 MB.', isError: true);
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _uploading = true;
     });
 
     try {
-      final fileUrl =
-      await CloudinaryService
-          .uploadAssignmentFile(
-        localFile,
-      );
+      final fileUrl = await CloudinaryService.uploadAssignmentFile(localFile);
 
-      if (fileUrl == null ||
-          fileUrl.isEmpty) {
-        throw Exception(
-          'Upload ke Cloudinary gagal.',
-        );
+      if (fileUrl == null || fileUrl.isEmpty) {
+        throw Exception('Upload ke Cloudinary gagal.');
       }
 
-      final submissionRef =
-      _firestore
+      final submissionRef = _firestore
           .collection('users')
           .doc(user.uid)
-          .collection(
-        'assignment_submissions',
-      )
+          .collection('assignment_submissions')
           .doc(assignmentId);
 
       await submissionRef.set(
         {
-          'assignmentId':
-          assignmentId,
-          'studentId':
-          user.uid,
-
-          'classId':
-          (widget.assignment[
-          'classId'] ??
-              '')
-              .toString(),
-
-          'courseId':
-          (widget.assignment[
-          'courseId'] ??
-              '')
-              .toString(),
-
-          'courseTitle':
-          (widget.assignment[
-          'courseTitle'] ??
-              '')
-              .toString(),
-
-          'assignmentTitle':
-          assignmentTitle,
-
-          'teacherId':
-          (widget.assignment[
-          'teacherId'] ??
-              '')
-              .toString(),
-
-          'teacherName':
-          (widget.assignment[
-          'teacherName'] ??
-              '')
-              .toString(),
-
-          'fileName':
-          _selectedFile!.name,
-
-          'fileUrl':
-          fileUrl,
-
-          'fileSize':
-          actualFileSize,
-
-          'storagePath':
-          'cloudinary/$assignmentId/${_selectedFile!.name}',
-
-          'status':
-          'Dikumpulkan',
-
-          'submittedAt':
-          FieldValue.serverTimestamp(),
-
-          'updatedAt':
-          FieldValue.serverTimestamp(),
+          'assignmentId': assignmentId,
+          'studentId': user.uid,
+          'classId': (widget.assignment['classId'] ?? '').toString(),
+          'courseId': (widget.assignment['courseId'] ?? '').toString(),
+          'courseTitle': (widget.assignment['courseTitle'] ?? '').toString(),
+          'assignmentTitle': assignmentTitle,
+          'teacherId': (widget.assignment['teacherId'] ?? '').toString(),
+          'teacherName': (widget.assignment['teacherName'] ?? '').toString(),
+          'fileName': _selectedFile!.name,
+          'fileUrl': fileUrl,
+          'fileSize': actualFileSize,
+          'storagePath': 'cloudinary/$assignmentId/${_selectedFile!.name}',
+          'status': 'Dikumpulkan',
+          'submittedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
         },
         SetOptions(merge: true),
       );
 
       if (!mounted) return;
-
       setState(() {
         _selectedFile = null;
       });
 
-      _showSnackBar(
-        'Tugas berhasil dikumpulkan.',
-      );
+      _showSnackBar('Tugas berhasil dikumpulkan.');
     } catch (e) {
       if (!mounted) return;
-
-      _showSnackBar(
-        'Gagal mengumpulkan tugas: $e',
-        isError: true,
-      );
+      _showSnackBar('Gagal mengumpulkan tugas: $e', isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -1719,9 +1195,7 @@ class _AssignmentDetailScreenState
   // DELETE SUBMISSION
   // ==========================================================
 
-  Future<void> _deleteSubmission({
-    required String fileName,
-  }) async {
+  Future<void> _deleteSubmission({required String fileName}) async {
     if (isOverdue) {
       _showSnackBar(
         'Pengumpulan tidak dapat dihapus setelah deadline.',
@@ -1730,14 +1204,11 @@ class _AssignmentDetailScreenState
       return;
     }
 
-    final confirmed =
-    await showDialog<bool>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text(
-            'Hapus Pengumpulan?',
-          ),
+          title: const Text('Hapus Pengumpulan?'),
           content: Text(
             fileName.isEmpty
                 ? 'File pengumpulan akan dihapus dari data tugas.'
@@ -1745,73 +1216,42 @@ class _AssignmentDetailScreenState
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(
-                  context,
-                  false,
-                );
-              },
-              child:
-              const Text('Batal'),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
             ),
             ElevatedButton(
-              onPressed: () {
-                Navigator.pop(
-                  context,
-                  true,
-                );
-              },
-              style:
-              ElevatedButton.styleFrom(
-                backgroundColor:
-                const Color(
-                  0xFFDC2626,
-                ),
-                foregroundColor:
-                Colors.white,
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                foregroundColor: Colors.white,
               ),
-              child:
-              const Text('Hapus'),
+              child: const Text('Hapus'),
             ),
           ],
         );
       },
     );
 
-    if (confirmed != true) {
-      return;
-    }
+    if (confirmed != true) return;
 
-    final ref =
-        _submissionReference;
-
+    final ref = _submissionReference;
     if (ref == null) {
-      _showSnackBar(
-        'Data pengguna tidak ditemukan.',
-        isError: true,
-      );
+      _showSnackBar('Data pengguna tidak ditemukan.', isError: true);
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _uploading = true;
     });
 
     try {
       await ref.delete();
-
       if (!mounted) return;
-
-      _showSnackBar(
-        'Pengumpulan berhasil dihapus.',
-      );
+      _showSnackBar('Pengumpulan berhasil dihapus.');
     } catch (e) {
       if (!mounted) return;
-
-      _showSnackBar(
-        'Gagal menghapus pengumpulan: $e',
-        isError: true,
-      );
+      _showSnackBar('Gagal menghapus pengumpulan: $e', isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -1825,42 +1265,26 @@ class _AssignmentDetailScreenState
   // OPEN FILE
   // ==========================================================
 
-  Future<void> _openFile(
-      String url,
-      ) async {
+  Future<void> _openFile(String url) async {
     try {
-      final uri =
-      Uri.tryParse(url);
+      final uri = Uri.tryParse(url);
 
-      if (uri == null ||
-          !uri.hasScheme) {
-        _showSnackBar(
-          'URL file tidak valid.',
-          isError: true,
-        );
+      if (uri == null || !uri.hasScheme) {
+        _showSnackBar('URL file tidak valid.', isError: true);
         return;
       }
 
-      final opened =
-      await launchUrl(
+      final opened = await launchUrl(
         uri,
-        mode:
-        LaunchMode.externalApplication,
+        mode: LaunchMode.externalApplication,
       );
 
       if (!opened && mounted) {
-        _showSnackBar(
-          'File tidak dapat dibuka.',
-          isError: true,
-        );
+        _showSnackBar('File tidak dapat dibuka.', isError: true);
       }
     } catch (e) {
       if (!mounted) return;
-
-      _showSnackBar(
-        'Gagal membuka file: $e',
-        isError: true,
-      );
+      _showSnackBar('Gagal membuka file: $e', isError: true);
     }
   }
 
@@ -1868,39 +1292,25 @@ class _AssignmentDetailScreenState
   // FILE ICON
   // ==========================================================
 
-  IconData _getFileIcon(
-      String fileName,
-      ) {
-    final name =
-    fileName.toLowerCase();
+  IconData _getFileIcon(String fileName) {
+    final name = fileName.toLowerCase();
 
-    if (name.endsWith('.pdf')) {
-      return Icons.picture_as_pdf_rounded;
-    }
-
-    if (name.endsWith('.doc') ||
-        name.endsWith('.docx')) {
+    if (name.endsWith('.pdf')) return Icons.picture_as_pdf_rounded;
+    if (name.endsWith('.doc') || name.endsWith('.docx')) {
       return Icons.description_rounded;
     }
-
-    if (name.endsWith('.ppt') ||
-        name.endsWith('.pptx')) {
+    if (name.endsWith('.ppt') || name.endsWith('.pptx')) {
       return Icons.slideshow_rounded;
     }
-
-    if (name.endsWith('.xls') ||
-        name.endsWith('.xlsx')) {
+    if (name.endsWith('.xls') || name.endsWith('.xlsx')) {
       return Icons.table_chart_rounded;
     }
-
     if (name.endsWith('.jpg') ||
         name.endsWith('.jpeg') ||
         name.endsWith('.png')) {
       return Icons.image_rounded;
     }
-
-    if (name.endsWith('.zip') ||
-        name.endsWith('.rar')) {
+    if (name.endsWith('.zip') || name.endsWith('.rar')) {
       return Icons.folder_zip_rounded;
     }
 
@@ -1911,41 +1321,24 @@ class _AssignmentDetailScreenState
   // SNACKBAR
   // ==========================================================
 
-  void _showSnackBar(
-      String message, {
-        bool isError = false,
-      }) {
-    ScaffoldMessenger.of(context)
-        .hideCurrentSnackBar();
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
 
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError
-            ? const Color(0xFFDC2626)
-            : const Color(0xFF16A34A),
-        behavior:
-        SnackBarBehavior.floating,
+        backgroundColor:
+        isError ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  static int _parseInt(
-      dynamic value,
-      ) {
-    if (value is int) {
-      return value;
-    }
-
-    if (value is double) {
-      return value.toInt();
-    }
-
-    return int.tryParse(
-      value?.toString() ?? '',
-    ) ??
-        0;
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 }
 
@@ -1953,8 +1346,7 @@ class _AssignmentDetailScreenState
 // SECTION CARD
 // ============================================================
 
-class _SectionCard
-    extends StatelessWidget {
+class _SectionCard extends StatelessWidget {
   final String title;
   final IconData icon;
   final Widget child;
@@ -1969,37 +1361,25 @@ class _SectionCard
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding:
-      const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        color: _surfaceColor(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _borderColor(context)),
       ),
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color:
-                const Color(0xFF2563EB),
-              ),
+              Icon(icon, size: 20, color: const Color(0xFF2563EB)),
               const SizedBox(width: 8),
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
-                  fontWeight:
-                  FontWeight.w700,
-                  color:
-                  Color(0xFF111827),
+                  fontWeight: FontWeight.w700,
+                  color: _primaryTextColor(context),
                 ),
               ),
             ],
@@ -2016,8 +1396,7 @@ class _SectionCard
 // DETAIL ROW
 // ============================================================
 
-class _DetailRow
-    extends StatelessWidget {
+class _DetailRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
@@ -2031,49 +1410,36 @@ class _DetailRow
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment:
-      CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color:
-            const Color(0xFFF3F4F6),
-            borderRadius:
-            BorderRadius.circular(10),
+            color: _isDarkMode(context) ? const Color(0xFF374151) : const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(
-            icon,
-            size: 18,
-            color:
-            Colors.grey.shade700,
-          ),
+          child: Icon(icon, size: 18, color: Colors.grey.shade700),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 12,
-                  color:
-                  Colors.grey.shade500,
+                  color: _secondaryTextColor(context),
                 ),
               ),
               const SizedBox(height: 3),
               Text(
                 value,
-                style:
-                const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
-                  fontWeight:
-                  FontWeight.w600,
-                  color:
-                  Color(0xFF111827),
+                  fontWeight: FontWeight.w600,
+                  color: _primaryTextColor(context),
                 ),
               ),
             ],
@@ -2088,8 +1454,7 @@ class _DetailRow
 // INFO ITEM
 // ============================================================
 
-class _InfoItem
-    extends StatelessWidget {
+class _InfoItem extends StatelessWidget {
   final IconData icon;
   final String label;
 
@@ -2102,23 +1467,16 @@ class _InfoItem
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 15,
-          color:
-          Colors.grey.shade500,
-        ),
+        Icon(icon, size: 15, color: Colors.grey.shade500),
         const SizedBox(width: 5),
         Expanded(
           child: Text(
             label,
             maxLines: 1,
-            overflow:
-            TextOverflow.ellipsis,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 11.5,
-              color:
-              Colors.grey.shade600,
+              color: _secondaryTextColor(context),
             ),
           ),
         ),
@@ -2131,8 +1489,7 @@ class _InfoItem
 // STATUS BADGE
 // ============================================================
 
-class _StatusBadge
-    extends StatelessWidget {
+class _StatusBadge extends StatelessWidget {
   final String text;
   final Color color;
 
@@ -2144,22 +1501,16 @@ class _StatusBadge
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 5,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: color.withOpacity(0.10),
-        borderRadius:
-        BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         text,
         style: TextStyle(
           fontSize: 10,
-          fontWeight:
-          FontWeight.w700,
+          fontWeight: FontWeight.w700,
           color: color,
         ),
       ),
@@ -2171,36 +1522,25 @@ class _StatusBadge
 // POINTS BADGE
 // ============================================================
 
-class _PointsBadge
-    extends StatelessWidget {
+class _PointsBadge extends StatelessWidget {
   final int points;
 
-  const _PointsBadge({
-    required this.points,
-  });
+  const _PointsBadge({required this.points});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
       decoration: BoxDecoration(
-        color:
-        const Color(0xFFFFF7ED),
-        borderRadius:
-        BorderRadius.circular(8),
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         '$points poin',
         style: const TextStyle(
           fontSize: 10,
-          fontWeight:
-          FontWeight.w700,
-          color:
-          Color(0xFFC2410C),
+          fontWeight: FontWeight.w700,
+          color: Color(0xFFC2410C),
         ),
       ),
     );
@@ -2211,34 +1551,28 @@ class _PointsBadge
 // EMPTY STATE
 // ============================================================
 
-class _EmptyState
-    extends StatelessWidget {
+class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding:
-        const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 82,
               height: 82,
               decoration: BoxDecoration(
-                color:
-                const Color(0xFFEFF4FF),
-                borderRadius:
-                BorderRadius.circular(24),
+                color: _softPrimaryColor(context),
+                borderRadius: BorderRadius.circular(24),
               ),
               child: const Icon(
                 Icons.assignment_outlined,
                 size: 42,
-                color:
-                Color(0xFF2563EB),
+                color: Color(0xFF2563EB),
               ),
             ),
             const SizedBox(height: 20),
@@ -2246,19 +1580,14 @@ class _EmptyState
               'Belum Ada Tugas',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight:
-                FontWeight.w700,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'Belum ada tugas untuk kelas ini.',
-              textAlign:
-              TextAlign.center,
-              style: TextStyle(
-                color:
-                Colors.grey.shade600,
-              ),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600),
             ),
           ],
         ),
@@ -2271,47 +1600,38 @@ class _EmptyState
 // ERROR STATE
 // ============================================================
 
-class _ErrorState
-    extends StatelessWidget {
+class _ErrorState extends StatelessWidget {
   final String message;
 
-  const _ErrorState({
-    required this.message,
-  });
+  const _ErrorState({required this.message});
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding:
-        const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(
               Icons.error_outline,
               size: 50,
-              color:
-              Color(0xFFDC2626),
+              color: Color(0xFFDC2626),
             ),
             const SizedBox(height: 14),
             const Text(
               'Terjadi Kesalahan',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight:
-                FontWeight.w700,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               message,
-              textAlign:
-              TextAlign.center,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color:
-                Colors.grey.shade600,
+                color: _secondaryTextColor(context),
                 fontSize: 13,
               ),
             ),
@@ -2326,9 +1646,7 @@ class _ErrorState
 // FORMAT DATE
 // ============================================================
 
-String _formatDate(
-    DateTime date,
-    ) {
+String _formatDate(DateTime date) {
   const months = [
     'Januari',
     'Februari',
@@ -2344,53 +1662,28 @@ String _formatDate(
     'Desember',
   ];
 
-  return '${date.day} '
-      '${months[date.month - 1]} '
-      '${date.year}';
+  return '${date.day} ${months[date.month - 1]} ${date.year}';
 }
 
-String _formatDateTime(
-    DateTime date,
-    ) {
-  final hour =
-  date.hour.toString().padLeft(
-    2,
-    '0',
-  );
+String _formatDateTime(DateTime date) {
+  final hour = date.hour.toString().padLeft(2, '0');
+  final minute = date.minute.toString().padLeft(2, '0');
 
-  final minute =
-  date.minute.toString().padLeft(
-    2,
-    '0',
-  );
-
-  return '${_formatDate(date)}, '
-      '$hour:$minute';
+  return '${_formatDate(date)}, $hour:$minute';
 }
 
 // ============================================================
 // FORMAT FILE SIZE
 // ============================================================
 
-String _formatFileSize(
-    int bytes,
-    ) {
-  if (bytes <= 0) {
-    return '0 B';
-  }
-
-  if (bytes < 1024) {
-    return '$bytes B';
-  }
-
+String _formatFileSize(int bytes) {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) {
     return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
-
-  if (bytes <
-      1024 * 1024 * 1024) {
+  if (bytes < 1024 * 1024 * 1024) {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
-
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
 }
