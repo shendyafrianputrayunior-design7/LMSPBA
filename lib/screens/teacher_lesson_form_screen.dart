@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -29,10 +30,10 @@ class TeacherLessonFormScreen extends StatefulWidget {
 class _TeacherLessonFormScreenState
     extends State<TeacherLessonFormScreen> {
   // ===============================================================
-  // CANONICAL TEACHER ID
+  // TEACHER ID
   // ===============================================================
 
-  static const String _fixedTeacherId = 'teacher_001';
+  String _teacherId = '';
 
   // ===============================================================
   // FORM
@@ -77,8 +78,6 @@ class _TeacherLessonFormScreenState
   // STATE
   // ===============================================================
 
-  String _teacherId = _fixedTeacherId;
-
   bool _loading = false;
   bool _uploadingVideo = false;
   bool _loadingTeacher = true;
@@ -88,27 +87,55 @@ class _TeacherLessonFormScreenState
   void initState() {
     super.initState();
 
-    _loadTeacherProfile();
-
-    if (widget.isEdit) {
-      _loadExistingLesson();
-    } else {
-      _durationController.text = '0';
-      _loadNextOrder();
-    }
+    _initialize();
   }
 
   // ===============================================================
-  // LOAD TEACHER
+  // INITIALIZE TEACHER
   // ===============================================================
 
-  Future<void> _loadTeacherProfile() async {
-    if (!mounted) return;
+  Future<void> _initialize() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
 
-    setState(() {
-      _teacherId = _fixedTeacherId;
-      _loadingTeacher = false;
-    });
+      if (user == null) {
+        if (!mounted) return;
+
+        setState(() {
+          _loadingTeacher = false;
+        });
+
+        _showMessage(
+          'Sesi login tidak ditemukan. Silakan login ulang.',
+        );
+
+        return;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _teacherId = user.uid;
+        _loadingTeacher = false;
+      });
+
+      if (widget.isEdit) {
+        await _loadExistingLesson();
+      } else {
+        _durationController.text = '0';
+        await _loadNextOrder();
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingTeacher = false;
+      });
+
+      _showMessage(
+        'Gagal memuat sesi guru: $e',
+      );
+    }
   }
 
   // ===============================================================
@@ -147,10 +174,25 @@ class _TeacherLessonFormScreenState
             .get();
 
         if (lessonDoc.exists) {
-          lessonData = {
-            ...lessonData,
-            ...lessonDoc.data()!,
-          };
+          final latestData = lessonDoc.data();
+
+          if (latestData != null) {
+            // Pastikan dokumen lesson milik guru yang sedang login.
+            final ownerId =
+            (latestData['teacherId'] ?? '').toString();
+
+            if (ownerId.isNotEmpty &&
+                ownerId != _teacherId) {
+              throw Exception(
+                'Materi ini bukan milik akun guru yang sedang login.',
+              );
+            }
+
+            lessonData = {
+              ...lessonData,
+              ...latestData,
+            };
+          }
         }
       }
 
@@ -158,8 +200,7 @@ class _TeacherLessonFormScreenState
       // CARI MATERIAL TERKAIT
       // -----------------------------------------------------------
 
-      final materialResult =
-      await _findLinkedMaterial(
+      final materialResult = await _findLinkedMaterial(
         lessonData,
       );
 
@@ -171,14 +212,12 @@ class _TeacherLessonFormScreenState
         _linkedMaterialId =
             materialResult['docId']?.toString();
 
-        final materialData =
-        Map<String, dynamic>.from(
+        final materialData = Map<String, dynamic>.from(
           materialResult['data'] as Map,
         );
 
         // URL material dari collection materials
-        final materialUrl =
-        _firstNonEmptyString([
+        final materialUrl = _firstNonEmptyString([
           materialData['attachmentUrl'],
           materialData['materialUrl'],
           materialData['fileUrl'],
@@ -206,8 +245,7 @@ class _TeacherLessonFormScreenState
         // gunakan video dari material.
         // ---------------------------------------------------------
 
-        final materialVideoUrl =
-        _firstNonEmptyString([
+        final materialVideoUrl = _firstNonEmptyString([
           materialData['videoUrl'],
         ]);
 
@@ -220,8 +258,7 @@ class _TeacherLessonFormScreenState
             'videoUrl': materialVideoUrl,
             'videoFileName':
             materialData['videoFileName'] ?? '',
-            'videoSize':
-            materialData['videoSize'] ?? 0,
+            'videoSize': materialData['videoSize'] ?? 0,
           };
         }
       }
@@ -263,17 +300,14 @@ class _TeacherLessonFormScreenState
   Future<Map<String, dynamic>?> _findLinkedMaterial(
       Map<String, dynamic> lessonData,
       ) async {
-    final lessonId =
-        widget.lessonId?.trim() ?? '';
+    final lessonId = widget.lessonId?.trim() ?? '';
 
-    final courseId =
-    _firstNonEmptyString([
+    final courseId = _firstNonEmptyString([
       lessonData['courseId'],
       widget.course.id,
     ]);
 
-    final lessonTitle =
-    _firstNonEmptyString([
+    final lessonTitle = _firstNonEmptyString([
       lessonData['title'],
     ]).toLowerCase().trim();
 
@@ -292,8 +326,7 @@ class _TeacherLessonFormScreenState
             .limit(10)
             .get();
 
-        final result =
-        _pickMaterialWithUrl(
+        final result = _pickMaterialWithUrl(
           snapshot.docs,
         );
 
@@ -305,8 +338,7 @@ class _TeacherLessonFormScreenState
         // Beberapa data lama mungkin memakai lessonId
         // ---------------------------------------------------------
 
-        final snapshotLessonId =
-        await _firestore
+        final snapshotLessonId = await _firestore
             .collection('materials')
             .where(
           'lessonId',
@@ -315,8 +347,7 @@ class _TeacherLessonFormScreenState
             .limit(10)
             .get();
 
-        final resultLessonId =
-        _pickMaterialWithUrl(
+        final resultLessonId = _pickMaterialWithUrl(
           snapshotLessonId.docs,
         );
 
@@ -328,8 +359,7 @@ class _TeacherLessonFormScreenState
         // Beberapa data lama mungkin memakai courseLesson
         // ---------------------------------------------------------
 
-        final snapshotCourseLesson =
-        await _firestore
+        final snapshotCourseLesson = await _firestore
             .collection('materials')
             .where(
           'courseLesson',
@@ -338,8 +368,7 @@ class _TeacherLessonFormScreenState
             .limit(10)
             .get();
 
-        final resultCourseLesson =
-        _pickMaterialWithUrl(
+        final resultCourseLesson = _pickMaterialWithUrl(
           snapshotCourseLesson.docs,
         );
 
@@ -376,13 +405,11 @@ class _TeacherLessonFormScreenState
             for (final doc in docs) {
               final data = doc.data();
 
-              final materialTitle =
-              _firstNonEmptyString([
+              final materialTitle = _firstNonEmptyString([
                 data['title'],
               ]).toLowerCase().trim();
 
-              final url =
-              _firstNonEmptyString([
+              final url = _firstNonEmptyString([
                 data['attachmentUrl'],
                 data['materialUrl'],
                 data['fileUrl'],
@@ -408,8 +435,7 @@ class _TeacherLessonFormScreenState
           final withUrl = docs.where((doc) {
             final data = doc.data();
 
-            final url =
-            _firstNonEmptyString([
+            final url = _firstNonEmptyString([
               data['attachmentUrl'],
               data['materialUrl'],
               data['fileUrl'],
@@ -444,8 +470,7 @@ class _TeacherLessonFormScreenState
     for (final doc in docs) {
       final data = doc.data();
 
-      final url =
-      _firstNonEmptyString([
+      final url = _firstNonEmptyString([
         data['attachmentUrl'],
         data['materialUrl'],
         data['fileUrl'],
@@ -498,8 +523,7 @@ class _TeacherLessonFormScreenState
     // URL MATERI
     // =============================================================
 
-    final materialUrl =
-    _firstNonEmptyString([
+    final materialUrl = _firstNonEmptyString([
       // Data yang baru ditemukan dari materials
       _linkedMaterialUrl,
 
@@ -510,8 +534,7 @@ class _TeacherLessonFormScreenState
       data['url'],
     ]);
 
-    _materialUrlController.text =
-        materialUrl;
+    _materialUrlController.text = materialUrl;
 
     // =============================================================
     // DURATION
@@ -532,9 +555,7 @@ class _TeacherLessonFormScreenState
     // =============================================================
 
     final existingVideoUrl =
-    (data['videoUrl'] ?? '')
-        .toString()
-        .trim();
+    (data['videoUrl'] ?? '').toString().trim();
 
     if (existingVideoUrl.isNotEmpty) {
       _videoUrl = existingVideoUrl;
@@ -547,13 +568,10 @@ class _TeacherLessonFormScreenState
     // =============================================================
 
     final existingVideoFileName =
-    (data['videoFileName'] ?? '')
-        .toString()
-        .trim();
+    (data['videoFileName'] ?? '').toString().trim();
 
     if (existingVideoFileName.isNotEmpty) {
-      _videoFileName =
-          existingVideoFileName;
+      _videoFileName = existingVideoFileName;
     } else {
       _videoFileName = null;
     }
@@ -562,12 +580,10 @@ class _TeacherLessonFormScreenState
     // VIDEO SIZE
     // =============================================================
 
-    final existingVideoSize =
-    data['videoSize'];
+    final existingVideoSize = data['videoSize'];
 
     if (existingVideoSize is int) {
-      _videoSize =
-          existingVideoSize;
+      _videoSize = existingVideoSize;
     } else if (existingVideoSize != null) {
       _videoSize = int.tryParse(
         existingVideoSize.toString(),
@@ -587,8 +603,7 @@ class _TeacherLessonFormScreenState
     for (final value in values) {
       if (value == null) continue;
 
-      final text =
-      value.toString().trim();
+      final text = value.toString().trim();
 
       if (text.isNotEmpty) {
         return text;
@@ -603,6 +618,8 @@ class _TeacherLessonFormScreenState
   // ===============================================================
 
   Future<void> _loadNextOrder() async {
+    if (_teacherId.isEmpty) return;
+
     try {
       final snapshot = await _firestore
           .collection('course_lessons')
@@ -612,7 +629,7 @@ class _TeacherLessonFormScreenState
       )
           .where(
         'teacherId',
-        isEqualTo: _fixedTeacherId,
+        isEqualTo: _teacherId,
       )
           .get();
 
@@ -621,8 +638,7 @@ class _TeacherLessonFormScreenState
       int nextOrder = 1;
 
       for (final doc in snapshot.docs) {
-        final value =
-        doc.data()['order'];
+        final value = doc.data()['order'];
 
         final order = value is int
             ? value
@@ -630,15 +646,12 @@ class _TeacherLessonFormScreenState
           value?.toString() ?? '',
         );
 
-        if (order != null &&
-            order >= nextOrder) {
-          nextOrder =
-              order + 1;
+        if (order != null && order >= nextOrder) {
+          nextOrder = order + 1;
         }
       }
 
-      _orderController.text =
-          nextOrder.toString();
+      _orderController.text = nextOrder.toString();
     } catch (_) {
       _orderController.text = '1';
     }
@@ -656,8 +669,8 @@ class _TeacherLessonFormScreenState
     }
 
     try {
-      final result =
-      await FilePicker.pickFile(
+      // File Picker dipertahankan sesuai kode asli.
+      final result = await FilePicker.pickFile(
         type: FileType.video,
       );
 
@@ -665,19 +678,16 @@ class _TeacherLessonFormScreenState
         return;
       }
 
-      final filePath =
-          result.path;
+      final filePath = result.path;
 
-      if (filePath == null ||
-          filePath.isEmpty) {
+      if (filePath == null || filePath.isEmpty) {
         _showMessage(
           'File video tidak dapat diakses.',
         );
         return;
       }
 
-      final file =
-      File(filePath);
+      final file = File(filePath);
 
       if (!await file.exists()) {
         _showMessage(
@@ -686,11 +696,9 @@ class _TeacherLessonFormScreenState
         return;
       }
 
-      final size =
-      await file.length();
+      final size = await file.length();
 
-      const maxSize =
-          100 * 1024 * 1024;
+      const maxSize = 100 * 1024 * 1024;
 
       if (size > maxSize) {
         _showMessage(
@@ -703,8 +711,7 @@ class _TeacherLessonFormScreenState
 
       setState(() {
         _selectedVideo = file;
-        _videoFileName =
-            result.name;
+        _videoFileName = result.name;
         _videoSize = size;
       });
     } catch (e) {
@@ -719,8 +726,7 @@ class _TeacherLessonFormScreenState
   // ===============================================================
 
   Future<bool> _uploadVideo() async {
-    final video =
-        _selectedVideo;
+    final video = _selectedVideo;
 
     if (video == null) {
       return true;
@@ -734,8 +740,7 @@ class _TeacherLessonFormScreenState
 
     try {
       final uploadedUrl =
-      await CloudinaryService
-          .uploadLessonVideo(
+      await CloudinaryService.uploadLessonVideo(
         video,
       );
 
@@ -750,21 +755,16 @@ class _TeacherLessonFormScreenState
         return false;
       }
 
-      final size =
-      await video.length();
+      final size = await video.length();
 
       if (!mounted) return false;
 
       setState(() {
-        _videoUrl =
-            uploadedUrl.trim();
+        _videoUrl = uploadedUrl.trim();
 
-        _videoFileName =
-            video.path
-                .split(
-              Platform.pathSeparator,
-            )
-                .last;
+        _videoFileName = video.path
+            .split(Platform.pathSeparator)
+            .last;
 
         _videoSize = size;
 
@@ -813,21 +813,19 @@ class _TeacherLessonFormScreenState
   // ===============================================================
 
   Future<void> _syncLinkedMaterial({
+    required String lessonId,
     required String materialUrl,
     required String videoUrl,
     required String videoFileName,
     required int videoSize,
   }) async {
-    final materialId =
-        _linkedMaterialId;
+    final materialId = _linkedMaterialId;
 
-    if (materialId == null ||
-        materialId.trim().isEmpty) {
+    if (materialId == null || materialId.trim().isEmpty) {
       return;
     }
 
-    final materialRef =
-    _firestore
+    final materialRef = _firestore
         .collection('materials')
         .doc(materialId);
 
@@ -836,49 +834,28 @@ class _TeacherLessonFormScreenState
       // URL
       // -----------------------------------------------------------
 
-      'attachmentUrl':
-      materialUrl,
-
-      'materialUrl':
-      materialUrl,
-
-      'fileUrl':
-      materialUrl,
-
-      'url':
-      materialUrl,
+      'attachmentUrl': materialUrl,
+      'materialUrl': materialUrl,
+      'fileUrl': materialUrl,
+      'url': materialUrl,
 
       // -----------------------------------------------------------
       // VIDEO
       // -----------------------------------------------------------
 
-      'videoUrl':
-      videoUrl,
-
-      'videoFileName':
-      videoFileName,
-
-      'videoSize':
-      videoSize,
+      'videoUrl': videoUrl,
+      'videoFileName': videoFileName,
+      'videoSize': videoSize,
 
       // -----------------------------------------------------------
       // RELATION
       // -----------------------------------------------------------
 
-      'courseLessonId':
-      widget.lessonId ?? '',
-
-      'courseId':
-      widget.course.id,
-
-      'courseName':
-      widget.course.title,
-
-      'teacherId':
-      _fixedTeacherId,
-
-      'updatedAt':
-      FieldValue.serverTimestamp(),
+      'courseLessonId': lessonId,
+      'courseId': widget.course.id,
+      'courseName': widget.course.title,
+      'teacherId': _teacherId,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -889,12 +866,19 @@ class _TeacherLessonFormScreenState
   Future<void> _saveLesson() async {
     if (_loading ||
         _uploadingVideo ||
-        _loadingExistingData) {
+        _loadingExistingData ||
+        _loadingTeacher) {
       return;
     }
 
-    if (!_formKey.currentState!
-        .validate()) {
+    if (_teacherId.isEmpty) {
+      _showMessage(
+        'Sesi guru tidak ditemukan. Silakan login ulang.',
+      );
+      return;
+    }
+
+    if (!_formKey.currentState!.validate()) {
       return;
     }
 
@@ -902,8 +886,6 @@ class _TeacherLessonFormScreenState
 
     setState(() {
       _loading = true;
-      _teacherId =
-          _fixedTeacherId;
     });
 
     try {
@@ -912,8 +894,7 @@ class _TeacherLessonFormScreenState
       // -----------------------------------------------------------
 
       if (_selectedVideo != null) {
-        final uploaded =
-        await _uploadVideo();
+        final uploaded = await _uploadVideo();
 
         if (!uploaded) {
           if (mounted) {
@@ -930,128 +911,116 @@ class _TeacherLessonFormScreenState
       // Duration
       // -----------------------------------------------------------
 
-      final duration =
-          int.tryParse(
-            _durationController
-                .text
-                .trim(),
-          ) ??
-              0;
+      final duration = int.tryParse(
+        _durationController.text.trim(),
+      ) ??
+          0;
 
       // -----------------------------------------------------------
       // Order
       // -----------------------------------------------------------
 
-      final order =
-          int.tryParse(
-            _orderController
-                .text
-                .trim(),
-          ) ??
-              1;
+      final order = int.tryParse(
+        _orderController.text.trim(),
+      ) ??
+          1;
 
       // -----------------------------------------------------------
       // URL MATERIAL
       // -----------------------------------------------------------
 
       final materialUrl =
-      _materialUrlController
-          .text
-          .trim();
+      _materialUrlController.text.trim();
 
       // ===========================================================
       // DATA LESSON
       // ===========================================================
 
-      final lessonData =
-      <String, dynamic>{
+      final lessonData = <String, dynamic>{
         // ---------------------------------------------------------
         // COURSE
         // ---------------------------------------------------------
 
-        'courseId':
-        widget.course.id,
-
-        'courseName':
-        widget.course.title,
+        'courseId': widget.course.id,
+        'courseName': widget.course.title,
 
         // ---------------------------------------------------------
         // TEACHER
         // ---------------------------------------------------------
 
-        'teacherId':
-        _fixedTeacherId,
+        'teacherId': _teacherId,
 
         // ---------------------------------------------------------
         // MATERI
         // ---------------------------------------------------------
 
-        'title':
-        _titleController
-            .text
-            .trim(),
-
-        'content':
-        _contentController
-            .text
-            .trim(),
+        'title': _titleController.text.trim(),
+        'content': _contentController.text.trim(),
 
         // ---------------------------------------------------------
         // URL MATERI
         // ---------------------------------------------------------
 
-        'attachmentUrl':
-        materialUrl,
-
-        'materialUrl':
-        materialUrl,
-
-        'fileUrl':
-        materialUrl,
-
-        'url':
-        materialUrl,
+        'attachmentUrl': materialUrl,
+        'materialUrl': materialUrl,
+        'fileUrl': materialUrl,
+        'url': materialUrl,
 
         // ---------------------------------------------------------
         // VIDEO
         // ---------------------------------------------------------
 
-        'videoUrl':
-        _videoUrl ?? '',
-
-        'videoFileName':
-        _videoFileName ?? '',
-
-        'videoSize':
-        _videoSize ?? 0,
+        'videoUrl': _videoUrl ?? '',
+        'videoFileName': _videoFileName ?? '',
+        'videoSize': _videoSize ?? 0,
 
         // ---------------------------------------------------------
         // LESSON
         // ---------------------------------------------------------
 
-        'duration':
-        duration,
-
-        'order':
-        order,
-
-        'updatedAt':
-        FieldValue.serverTimestamp(),
+        'duration': duration,
+        'order': order,
+        'updatedAt': FieldValue.serverTimestamp(),
       };
+
+      // Simpan ID lesson agar sinkronisasi material memakai
+      // ID dokumen yang benar untuk tambah maupun edit.
+      String savedLessonId = widget.lessonId ?? '';
 
       // ===========================================================
       // EDIT
       // ===========================================================
 
       if (widget.isEdit) {
-        await _firestore
-            .collection(
-          'course_lessons',
-        )
-            .doc(widget.lessonId)
-            .update(
-          lessonData,
-        );
+        final lessonRef = _firestore
+            .collection('course_lessons')
+            .doc(widget.lessonId);
+
+        final existingDoc = await lessonRef.get();
+
+        if (!existingDoc.exists) {
+          throw Exception(
+            'Dokumen materi tidak ditemukan.',
+          );
+        }
+
+        final existingData = existingDoc.data();
+
+        if (existingData != null) {
+          final existingTeacherId =
+          (existingData['teacherId'] ?? '').toString();
+
+          if (existingTeacherId.isNotEmpty &&
+              existingTeacherId != _teacherId) {
+            throw Exception(
+              'Kamu tidak memiliki izin untuk mengubah materi ini.',
+            );
+          }
+        }
+
+        await lessonRef.update(lessonData);
+
+        savedLessonId = lessonRef.id;
       }
 
       // ===========================================================
@@ -1059,17 +1028,14 @@ class _TeacherLessonFormScreenState
       // ===========================================================
 
       else {
-        final newLessonRef =
-        await _firestore
-            .collection(
-          'course_lessons',
-        )
+        final newLessonRef = await _firestore
+            .collection('course_lessons')
             .add({
           ...lessonData,
-          'createdAt':
-          FieldValue
-              .serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
         });
+
+        savedLessonId = newLessonRef.id;
 
         // ---------------------------------------------------------
         // Jika ada material yang sedang dihubungkan,
@@ -1077,22 +1043,14 @@ class _TeacherLessonFormScreenState
         // ---------------------------------------------------------
 
         if (_linkedMaterialId != null &&
-            _linkedMaterialId!
-                .trim()
-                .isNotEmpty) {
+            _linkedMaterialId!.trim().isNotEmpty) {
           await _firestore
-              .collection(
-            'materials',
-          )
-              .doc(
-            _linkedMaterialId,
-          )
+              .collection('materials')
+              .doc(_linkedMaterialId)
               .update({
-            'courseLessonId':
-            newLessonRef.id,
-            'updatedAt':
-            FieldValue
-                .serverTimestamp(),
+            'courseLessonId': newLessonRef.id,
+            'teacherId': _teacherId,
+            'updatedAt': FieldValue.serverTimestamp(),
           });
         }
       }
@@ -1102,25 +1060,19 @@ class _TeacherLessonFormScreenState
       // ===========================================================
 
       if (_linkedMaterialId != null &&
-          _linkedMaterialId!
-              .trim()
-              .isNotEmpty) {
+          _linkedMaterialId!.trim().isNotEmpty) {
         await _syncLinkedMaterial(
-          materialUrl:
-          materialUrl,
-          videoUrl:
-          _videoUrl ?? '',
-          videoFileName:
-          _videoFileName ?? '',
-          videoSize:
-          _videoSize ?? 0,
+          lessonId: savedLessonId,
+          materialUrl: materialUrl,
+          videoUrl: _videoUrl ?? '',
+          videoFileName: _videoFileName ?? '',
+          videoSize: _videoSize ?? 0,
         );
       }
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             widget.isEdit
@@ -1160,13 +1112,10 @@ class _TeacherLessonFormScreenState
       ) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content:
-        Text(message),
-        behavior:
-        SnackBarBehavior.floating,
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -1180,47 +1129,27 @@ class _TeacherLessonFormScreenState
     required IconData icon,
     String? hint,
   }) {
-    final theme =
-    Theme.of(context);
+    final theme = Theme.of(context);
 
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      prefixIcon:
-      Icon(icon),
+      prefixIcon: Icon(icon),
       filled: true,
-      fillColor: theme
-          .colorScheme
-          .surfaceContainerHighest
+      fillColor: theme.colorScheme.surfaceContainerHighest
           .withOpacity(0.35),
-      border:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(
-          14,
-        ),
-        borderSide:
-        BorderSide.none,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
       ),
-      enabledBorder:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(
-          14,
-        ),
-        borderSide:
-        BorderSide.none,
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
       ),
-      focusedBorder:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(
-          14,
-        ),
-        borderSide:
-        BorderSide(
-          color:
-          theme.colorScheme.primary,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: theme.colorScheme.primary,
           width: 1.5,
         ),
       ),
@@ -1234,8 +1163,7 @@ class _TeacherLessonFormScreenState
   String _formatFileSize(
       int? bytes,
       ) {
-    if (bytes == null ||
-        bytes <= 0) {
+    if (bytes == null || bytes <= 0) {
       return '';
     }
 
@@ -1243,13 +1171,11 @@ class _TeacherLessonFormScreenState
       return '$bytes B';
     }
 
-    if (bytes <
-        1024 * 1024) {
+    if (bytes < 1024 * 1024) {
       return '${(bytes / 1024).toStringAsFixed(1)} KB';
     }
 
-    if (bytes <
-        1024 * 1024 * 1024) {
+    if (bytes < 1024 * 1024 * 1024) {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
 
@@ -1261,101 +1187,58 @@ class _TeacherLessonFormScreenState
   // ===============================================================
 
   Widget _buildVideoSection() {
-    final theme =
-    Theme.of(context);
+    final theme = Theme.of(context);
 
     final hasExistingVideo =
-        _videoUrl != null &&
-            _videoUrl!
-                .trim()
-                .isNotEmpty;
+        _videoUrl != null && _videoUrl!.trim().isNotEmpty;
 
-    final hasSelectedVideo =
-        _selectedVideo != null;
+    final hasSelectedVideo = _selectedVideo != null;
 
-    final hasVideo =
-        hasExistingVideo ||
-            hasSelectedVideo;
+    final hasVideo = hasExistingVideo || hasSelectedVideo;
 
     return Container(
-      padding:
-      const EdgeInsets.all(16),
-      decoration:
-      BoxDecoration(
-        color: theme
-            .colorScheme
-            .surfaceContainerHighest
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest
             .withOpacity(0.35),
-        borderRadius:
-        BorderRadius.circular(
-          18,
-        ),
-        border:
-        Border.all(
-          color: theme
-              .colorScheme
-              .outline
-              .withOpacity(0.35),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: theme.colorScheme.outline.withOpacity(0.35),
         ),
       ),
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
                 width: 44,
                 height: 44,
-                decoration:
-                BoxDecoration(
-                  color: theme
-                      .colorScheme
-                      .primaryContainer,
-                  borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  Icons
-                      .video_library_outlined,
-                  color: theme
-                      .colorScheme
-                      .onPrimaryContainer,
+                  Icons.video_library_outlined,
+                  color: theme.colorScheme.onPrimaryContainer,
                 ),
               ),
-              const SizedBox(
-                width: 12,
-              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Video Lesson',
-                      style: theme
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(
-                        fontWeight:
-                        FontWeight.bold,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(
-                      height: 3,
-                    ),
+                    const SizedBox(height: 3),
                     Text(
                       'Tambahkan video pembelajaran untuk lesson ini.',
-                      style: theme
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                        color: theme
-                            .colorScheme
-                            .onSurfaceVariant,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1363,224 +1246,117 @@ class _TeacherLessonFormScreenState
               ),
             ],
           ),
-
-          const SizedBox(
-            height: 16,
-          ),
-
+          const SizedBox(height: 16),
           if (!hasVideo)
             Container(
-              width:
-              double.infinity,
-              padding:
-              const EdgeInsets
-                  .symmetric(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
                 vertical: 24,
                 horizontal: 16,
               ),
-              decoration:
-              BoxDecoration(
-                borderRadius:
-                BorderRadius.circular(
-                  14,
-                ),
-                border:
-                Border.all(
-                  color: theme
-                      .colorScheme
-                      .outline
-                      .withOpacity(
-                    0.5,
-                  ),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: theme.colorScheme.outline.withOpacity(0.5),
                 ),
               ),
               child: Column(
                 children: [
                   Icon(
-                    Icons
-                        .video_file_outlined,
+                    Icons.video_file_outlined,
                     size: 42,
-                    color: theme
-                        .colorScheme
-                        .onSurfaceVariant,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(
-                    height: 10,
-                  ),
+                  const SizedBox(height: 10),
                   Text(
                     'Belum ada video',
-                    style: theme
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(
-                      fontWeight:
-                      FontWeight.w600,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(
-                    height: 5,
-                  ),
+                  const SizedBox(height: 5),
                   Text(
                     'Format video seperti MP4 dapat digunakan.',
-                    textAlign:
-                    TextAlign.center,
-                    style: theme
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
-                      color: theme
-                          .colorScheme
-                          .onSurfaceVariant,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
                   OutlinedButton.icon(
-                    onPressed:
-                    _loading ||
+                    onPressed: _loading ||
                         _uploadingVideo ||
                         _loadingExistingData
                         ? null
                         : _pickVideo,
-                    icon:
-                    const Icon(
-                      Icons
-                          .upload_file_rounded,
-                    ),
-                    label:
-                    const Text(
-                      'Pilih Video',
-                    ),
+                    icon: const Icon(Icons.upload_file_rounded),
+                    label: const Text('Pilih Video'),
                   ),
                 ],
               ),
             )
           else
             Container(
-              width:
-              double.infinity,
-              padding:
-              const EdgeInsets.all(
-                14,
-              ),
-              decoration:
-              BoxDecoration(
-                color: theme
-                    .colorScheme
-                    .primaryContainer
-                    .withOpacity(
-                  0.45,
-                ),
-                borderRadius:
-                BorderRadius.circular(
-                  14,
-                ),
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer
+                    .withOpacity(0.45),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Row(
                 children: [
                   Container(
                     width: 48,
                     height: 48,
-                    decoration:
-                    BoxDecoration(
-                      color: theme
-                          .colorScheme
-                          .primary,
-                      borderRadius:
-                      BorderRadius
-                          .circular(
-                        12,
-                      ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child:
-                    const Icon(
-                      Icons
-                          .play_arrow_rounded,
-                      color:
-                      Colors.white,
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      color: Colors.white,
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _videoFileName ??
-                              'Video Lesson',
+                          _videoFileName ?? 'Video Lesson',
                           maxLines: 2,
-                          overflow:
-                          TextOverflow
-                              .ellipsis,
-                          style: theme
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(
-                            fontWeight:
-                            FontWeight.bold,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        if (_videoSize !=
-                            null &&
-                            _videoSize! >
-                                0) ...[
-                          const SizedBox(
-                            height: 4,
-                          ),
+                        if (_videoSize != null && _videoSize! > 0) ...[
+                          const SizedBox(height: 4),
                           Text(
-                            _formatFileSize(
-                              _videoSize,
-                            ),
-                            style: theme
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                              color: theme
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                            _formatFileSize(_videoSize),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
-                        if (hasExistingVideo &&
-                            !hasSelectedVideo) ...[
-                          const SizedBox(
-                            height: 3,
-                          ),
+                        if (hasExistingVideo && !hasSelectedVideo) ...[
+                          const SizedBox(height: 3),
                           Text(
                             'Video tersimpan',
-                            style: theme
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                              color:
-                              Colors.green,
-                              fontWeight:
-                              FontWeight
-                                  .w600,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.green,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                         if (hasSelectedVideo) ...[
-                          const SizedBox(
-                            height: 3,
-                          ),
+                          const SizedBox(height: 3),
                           Text(
                             'Video baru dipilih',
-                            style: theme
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                              color: theme
-                                  .colorScheme
-                                  .primary,
-                              fontWeight:
-                              FontWeight
-                                  .w600,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
@@ -1588,56 +1364,34 @@ class _TeacherLessonFormScreenState
                     ),
                   ),
                   PopupMenuButton<String>(
-                    enabled:
-                    !_loading &&
+                    enabled: !_loading &&
                         !_uploadingVideo &&
                         !_loadingExistingData,
-                    onSelected:
-                        (value) {
-                      if (value ==
-                          'replace') {
+                    onSelected: (value) {
+                      if (value == 'replace') {
                         _pickVideo();
-                      } else if (value ==
-                          'remove') {
+                      } else if (value == 'remove') {
                         _removeExistingVideo();
                       }
                     },
-                    itemBuilder:
-                        (context) =>
-                    const [
+                    itemBuilder: (context) => const [
                       PopupMenuItem(
-                        value:
-                        'replace',
+                        value: 'replace',
                         child: Row(
                           children: [
-                            Icon(
-                              Icons
-                                  .swap_horiz_rounded,
-                            ),
-                            SizedBox(
-                              width: 10,
-                            ),
-                            Text(
-                              'Ganti Video',
-                            ),
+                            Icon(Icons.swap_horiz_rounded),
+                            SizedBox(width: 10),
+                            Text('Ganti Video'),
                           ],
                         ),
                       ),
                       PopupMenuItem(
-                        value:
-                        'remove',
+                        value: 'remove',
                         child: Row(
                           children: [
-                            Icon(
-                              Icons
-                                  .delete_outline,
-                            ),
-                            SizedBox(
-                              width: 10,
-                            ),
-                            Text(
-                              'Hapus Video',
-                            ),
+                            Icon(Icons.delete_outline),
+                            SizedBox(width: 10),
+                            Text('Hapus Video'),
                           ],
                         ),
                       ),
@@ -1646,43 +1400,23 @@ class _TeacherLessonFormScreenState
                 ],
               ),
             ),
-
           if (_uploadingVideo) ...[
-            const SizedBox(
-              height: 16,
-            ),
+            const SizedBox(height: 16),
             const LinearProgressIndicator(),
-            const SizedBox(
-              height: 8,
-            ),
+            const SizedBox(height: 8),
             Text(
               'Mengupload video ke Cloudinary...',
-              style: theme
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(
-                color: theme
-                    .colorScheme
-                    .primary,
-                fontWeight:
-                FontWeight.w600,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
-
-          const SizedBox(
-            height: 12,
-          ),
-
+          const SizedBox(height: 12),
           Text(
             'Maksimal ukuran video: 100 MB',
-            style: theme
-                .textTheme
-                .bodySmall
-                ?.copyWith(
-              color: theme
-                  .colorScheme
-                  .onSurfaceVariant,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -1713,128 +1447,76 @@ class _TeacherLessonFormScreenState
   Widget build(
       BuildContext context,
       ) {
-    final theme =
-    Theme.of(context);
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isEdit
-              ? 'Edit Materi'
-              : 'Tambah Materi',
+          widget.isEdit ? 'Edit Materi' : 'Tambah Materi',
         ),
       ),
       body: SafeArea(
         child: Form(
           key: _formKey,
           child: ListView(
-            padding:
-            const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
             children: [
               Text(
                 widget.isEdit
                     ? 'Edit Materi'
                     : 'Buat Materi Baru',
-                style: theme
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(
-                  fontWeight:
-                  FontWeight.bold,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-
-              const SizedBox(
-                height: 8,
-              ),
-
+              const SizedBox(height: 8),
               Text(
                 widget.isEdit
                     ? 'Perbarui informasi materi pembelajaran.'
                     : 'Tambahkan materi pembelajaran untuk course ini.',
-                style: theme
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(
-                  color: theme
-                      .colorScheme
-                      .onSurfaceVariant,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-
-              const SizedBox(
-                height: 24,
-              ),
+              const SizedBox(height: 24),
 
               // ===================================================
               // COURSE
               // ===================================================
 
               Container(
-                padding:
-                const EdgeInsets.all(
-                  16,
-                ),
-                decoration:
-                BoxDecoration(
-                  color: theme
-                      .colorScheme
-                      .primaryContainer,
-                  borderRadius:
-                  BorderRadius.circular(
-                    16,
-                  ),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      Icons
-                          .menu_book_outlined,
-                      color: theme
-                          .colorScheme
-                          .onPrimaryContainer,
+                      Icons.menu_book_outlined,
+                      color: theme.colorScheme.onPrimaryContainer,
                     ),
-                    const SizedBox(
-                      width: 12,
-                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Course',
-                            style: theme
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                              color: theme
-                                  .colorScheme
-                                  .onPrimaryContainer
-                                  .withOpacity(
-                                0.75,
-                              ),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onPrimaryContainer
+                                  .withOpacity(0.75),
                             ),
                           ),
-                          const SizedBox(
-                            height: 2,
-                          ),
+                          const SizedBox(height: 2),
                           Text(
                             widget.course.title,
                             maxLines: 2,
-                            overflow:
-                            TextOverflow
-                                .ellipsis,
-                            style: theme
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                              fontWeight:
-                              FontWeight.bold,
-                              color: theme
-                                  .colorScheme
-                                  .onPrimaryContainer,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color:
+                              theme.colorScheme.onPrimaryContainer,
                             ),
                           ),
                         ],
@@ -1843,139 +1525,89 @@ class _TeacherLessonFormScreenState
                   ],
                 ),
               ),
-
-              const SizedBox(
-                height: 20,
-              ),
+              const SizedBox(height: 20),
 
               // ===================================================
               // TITLE
               // ===================================================
 
               TextFormField(
-                controller:
-                _titleController,
-                enabled:
-                !_loadingExistingData,
-                textInputAction:
-                TextInputAction.next,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Judul Materi',
-                  hint:
-                  'Contoh: Pengenalan Flutter',
-                  icon:
-                  Icons.title_outlined,
+                controller: _titleController,
+                enabled: !_loadingExistingData,
+                textInputAction: TextInputAction.next,
+                decoration: _inputDecoration(
+                  label: 'Judul Materi',
+                  hint: 'Contoh: Pengenalan Flutter',
+                  icon: Icons.title_outlined,
                 ),
-                validator:
-                    (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Judul materi wajib diisi';
                   }
 
                   return null;
                 },
               ),
-
-              const SizedBox(
-                height: 16,
-              ),
+              const SizedBox(height: 16),
 
               // ===================================================
               // CONTENT
               // ===================================================
 
               TextFormField(
-                controller:
-                _contentController,
-                enabled:
-                !_loadingExistingData,
+                controller: _contentController,
+                enabled: !_loadingExistingData,
                 maxLines: 8,
-                textInputAction:
-                TextInputAction.newline,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Isi Materi',
-                  hint:
-                  'Tulis materi pembelajaran di sini...',
-                  icon: Icons
-                      .description_outlined,
+                textInputAction: TextInputAction.newline,
+                decoration: _inputDecoration(
+                  label: 'Isi Materi',
+                  hint: 'Tulis materi pembelajaran di sini...',
+                  icon: Icons.description_outlined,
                 ),
-                validator:
-                    (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Isi materi wajib diisi';
                   }
 
                   return null;
                 },
               ),
-
-              const SizedBox(
-                height: 16,
-              ),
+              const SizedBox(height: 16),
 
               // ===================================================
               // URL MATERI
               // ===================================================
 
               TextFormField(
-                controller:
-                _materialUrlController,
-                enabled:
-                !_loadingExistingData,
-                keyboardType:
-                TextInputType.url,
-                textInputAction:
-                TextInputAction.next,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'URL Materi',
-                  hint:
-                  'Contoh: https://drive.google.com/...',
-                  icon:
-                  Icons.link_outlined,
+                controller: _materialUrlController,
+                enabled: !_loadingExistingData,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                decoration: _inputDecoration(
+                  label: 'URL Materi',
+                  hint: 'Contoh: https://drive.google.com/...',
+                  icon: Icons.link_outlined,
                 ),
-                validator:
-                    (value) {
-                  final url =
-                      value?.trim() ??
-                          '';
+                validator: (value) {
+                  final url = value?.trim() ?? '';
 
                   if (url.isEmpty) {
                     return null;
                   }
 
-                  final uri =
-                  Uri.tryParse(
-                    url,
-                  );
+                  final uri = Uri.tryParse(url);
 
                   if (uri == null ||
                       !uri.hasScheme ||
-                      (uri.scheme !=
-                          'http' &&
-                          uri.scheme !=
-                              'https')) {
+                      (uri.scheme != 'http' &&
+                          uri.scheme != 'https')) {
                     return 'URL tidak valid';
                   }
 
                   return null;
                 },
               ),
-
-              const SizedBox(
-                height: 24,
-              ),
+              const SizedBox(height: 24),
 
               // ===================================================
               // DURATION + ORDER
@@ -1984,38 +1616,22 @@ class _TeacherLessonFormScreenState
               Row(
                 children: [
                   Expanded(
-                    child:
-                    TextFormField(
-                      controller:
-                      _durationController,
-                      enabled:
-                      !_loadingExistingData,
-                      keyboardType:
-                      TextInputType
-                          .number,
-                      textInputAction:
-                      TextInputAction
-                          .next,
-                      decoration:
-                      _inputDecoration(
-                        label:
-                        'Durasi',
-                        hint:
-                        'Contoh: 30',
-                        icon: Icons
-                            .schedule_outlined,
+                    child: TextFormField(
+                      controller: _durationController,
+                      enabled: !_loadingExistingData,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.next,
+                      decoration: _inputDecoration(
+                        label: 'Durasi',
+                        hint: 'Contoh: 30',
+                        icon: Icons.schedule_outlined,
                       ),
-                      validator:
-                          (value) {
-                        final number =
-                        int.tryParse(
-                          value?.trim() ??
-                              '',
+                      validator: (value) {
+                        final number = int.tryParse(
+                          value?.trim() ?? '',
                         );
 
-                        if (number ==
-                            null ||
-                            number < 0) {
+                        if (number == null || number < 0) {
                           return 'Durasi tidak valid';
                         }
 
@@ -2023,41 +1639,23 @@ class _TeacherLessonFormScreenState
                       },
                     ),
                   ),
-
-                  const SizedBox(
-                    width: 12,
-                  ),
-
+                  const SizedBox(width: 12),
                   Expanded(
-                    child:
-                    TextFormField(
-                      controller:
-                      _orderController,
-                      enabled:
-                      !_loadingExistingData,
-                      keyboardType:
-                      TextInputType
-                          .number,
-                      decoration:
-                      _inputDecoration(
-                        label:
-                        'Urutan',
-                        hint:
-                        'Contoh: 1',
-                        icon: Icons
-                            .format_list_numbered,
+                    child: TextFormField(
+                      controller: _orderController,
+                      enabled: !_loadingExistingData,
+                      keyboardType: TextInputType.number,
+                      decoration: _inputDecoration(
+                        label: 'Urutan',
+                        hint: 'Contoh: 1',
+                        icon: Icons.format_list_numbered,
                       ),
-                      validator:
-                          (value) {
-                        final number =
-                        int.tryParse(
-                          value?.trim() ??
-                              '',
+                      validator: (value) {
+                        final number = int.tryParse(
+                          value?.trim() ?? '',
                         );
 
-                        if (number ==
-                            null ||
-                            number < 1) {
+                        if (number == null || number < 1) {
                           return 'Urutan minimal 1';
                         }
 
@@ -2067,10 +1665,7 @@ class _TeacherLessonFormScreenState
                   ),
                 ],
               ),
-
-              const SizedBox(
-                height: 24,
-              ),
+              const SizedBox(height: 24),
 
               // ===================================================
               // VIDEO
@@ -2078,9 +1673,7 @@ class _TeacherLessonFormScreenState
 
               _buildVideoSection(),
 
-              const SizedBox(
-                height: 28,
-              ),
+              const SizedBox(height: 28),
 
               // ===================================================
               // SAVE
@@ -2088,37 +1681,34 @@ class _TeacherLessonFormScreenState
 
               SizedBox(
                 height: 52,
-                child:
-                FilledButton.icon(
-                  onPressed:
-                  _loading ||
+                child: FilledButton.icon(
+                  onPressed: _loading ||
                       _uploadingVideo ||
-                      _loadingExistingData
+                      _loadingExistingData ||
+                      _loadingTeacher
                       ? null
                       : _saveLesson,
-                  icon:
-                  _loading ||
+                  icon: _loading ||
                       _uploadingVideo ||
-                      _loadingExistingData
+                      _loadingExistingData ||
+                      _loadingTeacher
                       ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child:
-                    CircularProgressIndicator(
-                      strokeWidth:
-                      2,
-                      color:
-                      Colors.white,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
                     ),
                   )
                       : Icon(
                     widget.isEdit
-                        ? Icons
-                        .save_outlined
+                        ? Icons.save_outlined
                         : Icons.add,
                   ),
                   label: Text(
-                    _loadingExistingData
+                    _loadingTeacher
+                        ? 'Memuat Sesi Guru...'
+                        : _loadingExistingData
                         ? 'Memuat Data...'
                         : _uploadingVideo
                         ? 'Mengupload Video...'
@@ -2130,10 +1720,7 @@ class _TeacherLessonFormScreenState
                   ),
                 ),
               ),
-
-              const SizedBox(
-                height: 12,
-              ),
+              const SizedBox(height: 12),
 
               // ===================================================
               // CANCEL
@@ -2141,28 +1728,19 @@ class _TeacherLessonFormScreenState
 
               SizedBox(
                 height: 52,
-                child:
-                OutlinedButton(
-                  onPressed:
-                  _loading ||
+                child: OutlinedButton(
+                  onPressed: _loading ||
                       _uploadingVideo ||
-                      _loadingExistingData
+                      _loadingExistingData ||
+                      _loadingTeacher
                       ? null
                       : () {
-                    Navigator.pop(
-                      context,
-                    );
+                    Navigator.pop(context);
                   },
-                  child:
-                  const Text(
-                    'Batal',
-                  ),
+                  child: const Text('Batal'),
                 ),
               ),
-
-              const SizedBox(
-                height: 20,
-              ),
+              const SizedBox(height: 20),
             ],
           ),
         ),

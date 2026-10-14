@@ -22,14 +22,17 @@ class _TeacherDiscussionFormScreenState
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _contentController = TextEditingController();
+  final TextEditingController _titleController =
+  TextEditingController();
+  final TextEditingController _contentController =
+  TextEditingController();
 
   bool _loading = false;
   bool _loadingData = true;
 
   String _teacherName = '';
   String? _teacherDocumentId;
+  String? _loadError;
 
   List<Map<String, dynamic>> _courses = [];
   List<Map<String, dynamic>> _classes = [];
@@ -41,7 +44,8 @@ class _TeacherDiscussionFormScreenState
   String? _selectedClassName;
 
   bool get _isEdit =>
-      widget.discussionId != null && widget.discussionId!.isNotEmpty;
+      widget.discussionId != null &&
+          widget.discussionId!.isNotEmpty;
 
   @override
   void initState() {
@@ -67,10 +71,7 @@ class _TeacherDiscussionFormScreenState
       return null;
     }
 
-    // ------------------------------------------------------------
-    // 1. users/{uid}.teacherId
-    // ------------------------------------------------------------
-
+    // 1. Cari users/{uid}.teacherId.
     try {
       final userDoc = await _firestore
           .collection('users')
@@ -78,7 +79,6 @@ class _TeacherDiscussionFormScreenState
           .get();
 
       final data = userDoc.data();
-
       final teacherId = data?['teacherId']?.toString().trim();
 
       if (teacherId != null && teacherId.isNotEmpty) {
@@ -95,10 +95,7 @@ class _TeacherDiscussionFormScreenState
       debugPrint('ERROR GET TEACHER ID FROM USER: $e');
     }
 
-    // ------------------------------------------------------------
-    // 2. Cari berdasarkan email
-    // ------------------------------------------------------------
-
+    // 2. Fallback berdasarkan email akun.
     try {
       final email = user.email?.trim();
 
@@ -126,21 +123,39 @@ class _TeacherDiscussionFormScreenState
 
   Future<void> _loadInitialData() async {
     try {
+      final user = _auth.currentUser;
+
+      if (user == null) {
+        throw Exception('Anda belum login.');
+      }
+
       await _loadTeacherProfile();
+
+      if (_teacherDocumentId == null ||
+          _teacherDocumentId!.isEmpty) {
+        throw Exception(
+          'Data guru tidak ditemukan. '
+              'Periksa teacherId pada collection users atau email '
+              'pada collection teachers.',
+        );
+      }
+
       await _loadCourses();
       await _loadClasses();
 
+      // Data edit dimuat setelah dropdown tersedia.
       if (_isEdit) {
         _loadExistingDiscussion();
       }
     } catch (e) {
       debugPrint('ERROR INITIAL DATA: $e');
-    }
-
-    if (mounted) {
-      setState(() {
-        _loadingData = false;
-      });
+      _loadError = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingData = false;
+        });
+      }
     }
   }
 
@@ -187,7 +202,11 @@ class _TeacherDiscussionFormScreenState
     } catch (e) {
       debugPrint('ERROR LOAD TEACHER PROFILE: $e');
 
-      _teacherName = user.displayName?.trim() ?? 'Guru';
+      _teacherName = user.displayName?.trim() ?? '';
+
+      if (_teacherName.isEmpty) {
+        _teacherName = 'Guru';
+      }
     }
 
     _teacherDocumentId = await _getTeacherDocumentId();
@@ -205,86 +224,17 @@ class _TeacherDiscussionFormScreenState
 
   Future<void> _loadCourses() async {
     final user = _auth.currentUser;
+    final teacherId = _teacherDocumentId;
 
     if (user == null) {
       return;
     }
 
-    final teacherId = _teacherDocumentId;
-
     final Map<String, Map<String, dynamic>> courseMap = {};
 
-    // ------------------------------------------------------------
-    // QUERY DENGAN TEACHER DOCUMENT ID
-    // ------------------------------------------------------------
-
-    if (teacherId != null && teacherId.isNotEmpty) {
-      try {
-        debugPrint(
-          'QUERY COURSES teacherId = $teacherId',
-        );
-
-        final snapshot = await _firestore
-            .collection('courses')
-            .where(
-          'teacherId',
-          isEqualTo: teacherId,
-        )
-            .get();
-
-        debugPrint(
-          'HASIL COURSE TEACHER ID = ${snapshot.docs.length}',
-        );
-
-        for (final doc in snapshot.docs) {
-          final data = doc.data();
-
-          final name = (
-              data['name'] ??
-                  data['title'] ??
-                  data['courseName'] ??
-                  data['subject'] ??
-                  data['nama'] ??
-                  ''
-          ).toString().trim();
-
-          if (name.isEmpty) {
-            continue;
-          }
-
-          courseMap[doc.id] = {
-            'id': doc.id,
-            'name': name,
-            'teacherId': data['teacherId'],
-          };
-        }
-      } catch (e) {
-        debugPrint('ERROR COURSE TEACHER ID: $e');
-      }
-    }
-
-    // ------------------------------------------------------------
-    // QUERY DENGAN AUTH UID
-    // DATA LAMA
-    // ------------------------------------------------------------
-
-    try {
-      debugPrint(
-        'QUERY COURSES teacherId = ${user.uid}',
-      );
-
-      final snapshot = await _firestore
-          .collection('courses')
-          .where(
-        'teacherId',
-        isEqualTo: user.uid,
-      )
-          .get();
-
-      debugPrint(
-        'HASIL COURSE AUTH UID = ${snapshot.docs.length}',
-      );
-
+    void addCourses(
+        QuerySnapshot<Map<String, dynamic>> snapshot,
+        ) {
       for (final doc in snapshot.docs) {
         final data = doc.data();
 
@@ -307,53 +257,48 @@ class _TeacherDiscussionFormScreenState
           'teacherId': data['teacherId'],
         };
       }
+    }
+
+    // Query menggunakan document ID guru.
+    if (teacherId != null && teacherId.isNotEmpty) {
+      try {
+        debugPrint('QUERY COURSES teacherId = $teacherId');
+
+        final snapshot = await _firestore
+            .collection('courses')
+            .where('teacherId', isEqualTo: teacherId)
+            .get();
+
+        addCourses(snapshot);
+
+        debugPrint(
+          'HASIL COURSE TEACHER ID = ${snapshot.docs.length}',
+        );
+      } catch (e) {
+        debugPrint('ERROR COURSE TEACHER ID: $e');
+      }
+    }
+
+    // Kompatibilitas dengan data lama yang menggunakan UID.
+    try {
+      debugPrint('QUERY COURSES teacherId = ${user.uid}');
+
+      final snapshot = await _firestore
+          .collection('courses')
+          .where('teacherId', isEqualTo: user.uid)
+          .get();
+
+      addCourses(snapshot);
+
+      debugPrint(
+        'HASIL COURSE AUTH UID = ${snapshot.docs.length}',
+      );
     } catch (e) {
       debugPrint('ERROR COURSE AUTH UID: $e');
     }
 
-    // ------------------------------------------------------------
-    // FALLBACK SEMUA COURSE
-    // ------------------------------------------------------------
-
-    if (courseMap.isEmpty) {
-      try {
-        debugPrint('COURSE TIDAK DITEMUKAN.');
-        debugPrint('FALLBACK GET ALL COURSES');
-
-        final snapshot =
-        await _firestore.collection('courses').get();
-
-        debugPrint(
-          'TOTAL SEMUA COURSE = ${snapshot.docs.length}',
-        );
-
-        for (final doc in snapshot.docs) {
-          final data = doc.data();
-
-          final name = (
-              data['name'] ??
-                  data['title'] ??
-                  data['courseName'] ??
-                  data['subject'] ??
-                  data['nama'] ??
-                  ''
-          ).toString().trim();
-
-          if (name.isEmpty) {
-            continue;
-          }
-
-          courseMap[doc.id] = {
-            'id': doc.id,
-            'name': name,
-            'teacherId': data['teacherId'],
-          };
-        }
-      } catch (e) {
-        debugPrint('ERROR FALLBACK COURSES: $e');
-      }
-    }
-
+    // Jangan mengambil semua courses sebagai fallback karena dapat
+    // menampilkan mata pelajaran milik guru lain.
     _courses = courseMap.values.toList();
 
     _courses.sort(
@@ -370,8 +315,7 @@ class _TeacherDiscussionFormScreenState
 
     for (final course in _courses) {
       debugPrint(
-        'COURSE: ${course['id']} | '
-            '${course['name']}',
+        'COURSE: ${course['id']} | ${course['name']}',
       );
     }
 
@@ -412,9 +356,7 @@ class _TeacherDiscussionFormScreenState
         ),
       );
 
-      debugPrint(
-        'TOTAL CLASS : ${_classes.length}',
-      );
+      debugPrint('TOTAL CLASS : ${_classes.length}');
     } catch (e) {
       debugPrint('ERROR LOAD CLASSES: $e');
     }
@@ -428,81 +370,51 @@ class _TeacherDiscussionFormScreenState
     final data = widget.discussionData;
 
     if (data == null) {
+      _loadError = 'Data diskusi yang akan diedit tidak tersedia.';
       return;
     }
 
-    _titleController.text =
-        data['title']?.toString() ?? '';
+    _titleController.text = data['title']?.toString() ?? '';
+    _contentController.text = data['content']?.toString() ?? '';
 
-    _contentController.text =
-        data['content']?.toString() ?? '';
-
-    // ------------------------------------------------------------
     // CLASS ID
-    // ------------------------------------------------------------
+    final savedClassId = data['classId']?.toString().trim();
 
-    final savedClassId =
-    data['classId']?.toString().trim();
-
-    if (savedClassId != null &&
-        savedClassId.isNotEmpty) {
-      final classExists = _classes.any(
-            (item) =>
-        item['id'].toString() == savedClassId,
+    if (savedClassId != null && savedClassId.isNotEmpty) {
+      final index = _classes.indexWhere(
+            (item) => item['id'].toString() == savedClassId,
       );
 
-      if (classExists) {
+      if (index >= 0) {
         _selectedClassId = savedClassId;
-
-        final selectedClass =
-        _classes.firstWhere(
-              (item) =>
-          item['id'].toString() == savedClassId,
-        );
-
         _selectedClassName =
-            selectedClass['name']?.toString();
+            _classes[index]['name']?.toString();
+      } else {
+        // Tetap simpan ID lama agar pengguna mengetahui
+        // bahwa kelas tersebut tidak tersedia pada dropdown.
+        debugPrint('KELAS LAMA TIDAK DITEMUKAN: $savedClassId');
       }
     }
 
-    // ------------------------------------------------------------
     // COURSE ID
-    // ------------------------------------------------------------
-
-    final savedCourseId =
-    data['courseId']?.toString().trim();
-
+    final savedCourseId = data['courseId']?.toString().trim();
     final savedCourseName =
     data['courseName']?.toString().trim();
+    final savedSubject = data['subject']?.toString().trim();
 
-    final savedSubject =
-    data['subject']?.toString().trim();
-
-    if (savedCourseId != null &&
-        savedCourseId.isNotEmpty) {
-      final courseExists = _courses.any(
-            (item) =>
-        item['id'].toString() == savedCourseId,
+    if (savedCourseId != null && savedCourseId.isNotEmpty) {
+      final index = _courses.indexWhere(
+            (item) => item['id'].toString() == savedCourseId,
       );
 
-      if (courseExists) {
+      if (index >= 0) {
         _selectedCourseId = savedCourseId;
-
-        final selectedCourse =
-        _courses.firstWhere(
-              (item) =>
-          item['id'].toString() == savedCourseId,
-        );
-
         _selectedCourseName =
-            selectedCourse['name']?.toString();
+            _courses[index]['name']?.toString();
       }
     }
 
-    // ------------------------------------------------------------
-    // FALLBACK COURSE NAME
-    // ------------------------------------------------------------
-
+    // FALLBACK BERDASARKAN NAMA MATA PELAJARAN
     final fallbackCourseName =
     savedCourseName?.isNotEmpty == true
         ? savedCourseName
@@ -512,18 +424,18 @@ class _TeacherDiscussionFormScreenState
         _selectedCourseId!.isEmpty) &&
         fallbackCourseName != null &&
         fallbackCourseName.isNotEmpty) {
-      for (final course in _courses) {
-        final name =
-            course['name']?.toString().trim() ?? '';
+      final index = _courses.indexWhere(
+            (course) =>
+        course['name']
+            .toString()
+            .toLowerCase() ==
+            fallbackCourseName.toLowerCase(),
+      );
 
-        if (name.toLowerCase() ==
-            fallbackCourseName.toLowerCase()) {
-          _selectedCourseId =
-              course['id']?.toString();
-
-          _selectedCourseName = name;
-          break;
-        }
+      if (index >= 0) {
+        _selectedCourseId = _courses[index]['id']?.toString();
+        _selectedCourseName =
+            _courses[index]['name']?.toString();
       }
     }
 
@@ -546,37 +458,14 @@ class _TeacherDiscussionFormScreenState
     final user = _auth.currentUser;
 
     if (user == null) {
-      _showMessage(
-        'Anda belum login.',
-        isError: true,
-      );
+      _showMessage('Anda belum login.', isError: true);
       return;
     }
 
-    final title =
-    _titleController.text.trim();
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
 
-    final content =
-    _contentController.text.trim();
-
-    debugPrint('');
-    debugPrint('======================================');
-    debugPrint('DEBUG SAVE DISCUSSION');
-    debugPrint('======================================');
-    debugPrint('UID          : ${user.uid}');
-    debugPrint('Teacher ID   : $_teacherDocumentId');
-    debugPrint('Course ID    : $_selectedCourseId');
-    debugPrint('Course Name  : $_selectedCourseName');
-    debugPrint('Class ID     : $_selectedClassId');
-    debugPrint('Class Name   : $_selectedClassName');
-    debugPrint('Title        : $title');
-    debugPrint('Content      : ${content.length} karakter');
-    debugPrint('======================================');
-
-    // ------------------------------------------------------------
     // VALIDASI
-    // ------------------------------------------------------------
-
     if (title.isEmpty) {
       _showMessage(
         'Judul diskusi belum diisi.',
@@ -588,6 +477,15 @@ class _TeacherDiscussionFormScreenState
     if (content.isEmpty) {
       _showMessage(
         'Isi diskusi belum diisi.',
+        isError: true,
+      );
+      return;
+    }
+
+    if (_teacherDocumentId == null ||
+        _teacherDocumentId!.isEmpty) {
+      _showMessage(
+        'Data guru tidak ditemukan. Muat ulang form.',
         isError: true,
       );
       return;
@@ -605,9 +503,36 @@ class _TeacherDiscussionFormScreenState
     }
 
     if (_selectedClassId == null ||
-        _selectedClassId!.isEmpty) {
+        _selectedClassId!.isEmpty ||
+        _selectedClassName == null ||
+        _selectedClassName!.isEmpty) {
       _showMessage(
         'Silakan pilih kelas.',
+        isError: true,
+      );
+      return;
+    }
+
+    // Pastikan pilihan masih terdapat pada data yang dimuat.
+    final selectedCourseIndex = _courses.indexWhere(
+          (course) => course['id'].toString() == _selectedCourseId,
+    );
+
+    final selectedClassIndex = _classes.indexWhere(
+          (item) => item['id'].toString() == _selectedClassId,
+    );
+
+    if (selectedCourseIndex < 0) {
+      _showMessage(
+        'Mata pelajaran yang dipilih tidak tersedia.',
+        isError: true,
+      );
+      return;
+    }
+
+    if (selectedClassIndex < 0) {
+      _showMessage(
+        'Kelas yang dipilih tidak tersedia.',
         isError: true,
       );
       return;
@@ -618,128 +543,87 @@ class _TeacherDiscussionFormScreenState
     });
 
     try {
-      // ----------------------------------------------------------
-      // PASTIKAN TEACHER ID
-      // ----------------------------------------------------------
+      final teacherId = _teacherDocumentId!;
 
-      final teacherId =
-      await _getTeacherDocumentId();
+      final subject =
+      _courses[selectedCourseIndex]['name'].toString().trim();
 
-      if (teacherId == null ||
-          teacherId.isEmpty) {
-        throw Exception(
-          'Data guru tidak ditemukan.',
-        );
-      }
+      final className =
+      _classes[selectedClassIndex]['name'].toString().trim();
 
-      _teacherDocumentId = teacherId;
+      debugPrint('======================================');
+      debugPrint('DEBUG SAVE DISCUSSION');
+      debugPrint('UID         : ${user.uid}');
+      debugPrint('Teacher ID  : $teacherId');
+      debugPrint('Course ID   : $_selectedCourseId');
+      debugPrint('Course Name : $subject');
+      debugPrint('Class ID    : $_selectedClassId');
+      debugPrint('Class Name  : $className');
+      debugPrint('Title       : $title');
+      debugPrint('Content     : ${content.length} karakter');
+      debugPrint('======================================');
 
-      // ----------------------------------------------------------
-      // AMBIL NAMA COURSE DARI ID TERPILIH
-      // ----------------------------------------------------------
-
-      String subject =
-          _selectedCourseName?.trim() ?? '';
-
-      if (subject.isEmpty &&
-          _selectedCourseId != null) {
-        for (final course in _courses) {
-          if (course['id'].toString() ==
-              _selectedCourseId) {
-            subject =
-                course['name'].toString().trim();
-            break;
-          }
-        }
-      }
-
-      // ----------------------------------------------------------
-      // AMBIL NAMA KELAS DARI ID TERPILIH
-      // ----------------------------------------------------------
-
-      String className =
-          _selectedClassName?.trim() ?? '';
-
-      if (className.isEmpty) {
-        for (final item in _classes) {
-          if (item['id'].toString() ==
-              _selectedClassId) {
-            className =
-                item['name'].toString().trim();
-            break;
-          }
-        }
-      }
-
-      // ----------------------------------------------------------
-      // DATA FIRESTORE
-      // ----------------------------------------------------------
-
-      final firestoreData =
-      <String, dynamic>{
-        // Struktur utama
+      final firestoreData = <String, dynamic>{
         'userId': user.uid,
         'username': _teacherName,
         'title': title,
         'content': content,
         'subject': subject,
         'classId': _selectedClassId,
-
-        // Relasi guru
         'teacherId': teacherId,
-
-        // Data tambahan
         'courseId': _selectedCourseId,
         'courseName': subject,
         'className': className,
-
-        'updatedAt':
-        FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // ----------------------------------------------------------
-      // CREATE
-      // ----------------------------------------------------------
-
       if (!_isEdit) {
+        // CREATE
         firestoreData['createdAt'] =
             FieldValue.serverTimestamp();
 
-        final doc =
-        await _firestore
+        final doc = await _firestore
             .collection('discussions')
             .add(firestoreData);
 
-        debugPrint('');
-        debugPrint('======================================');
         debugPrint('DISKUSI BERHASIL DITAMBAHKAN');
-        debugPrint('DOCUMENT ID : ${doc.id}');
-        debugPrint('userId      : ${user.uid}');
-        debugPrint('username    : $_teacherName');
-        debugPrint('teacherId   : $teacherId');
-        debugPrint('title       : $title');
-        debugPrint('subject     : $subject');
-        debugPrint('classId     : ${_selectedClassId!}');
-        debugPrint('======================================');
-      }
-
-      // ----------------------------------------------------------
-      // UPDATE
-      // ----------------------------------------------------------
-
-      else {
-        await _firestore
+        debugPrint('DOCUMENT ID: ${doc.id}');
+      } else {
+        // UPDATE: createdAt tidak diubah.
+        final docRef = _firestore
             .collection('discussions')
-            .doc(widget.discussionId)
-            .update(firestoreData);
+            .doc(widget.discussionId);
 
-        debugPrint('');
-        debugPrint('======================================');
-        debugPrint('DISKUSI BERHASIL DIUPDATE');
-        debugPrint(
-          'DOCUMENT ID : ${widget.discussionId}',
-        );
-        debugPrint('======================================');
+        // Periksa dokumen yang akan diedit dan pastikan dokumen
+        // masih tersedia serta dimiliki akun yang sedang login.
+        final existingDoc = await docRef.get();
+
+        if (!existingDoc.exists) {
+          throw Exception('Data diskusi tidak ditemukan.');
+        }
+
+        final existingData = existingDoc.data();
+
+        final existingUserId =
+        existingData?['userId']?.toString();
+
+        final existingTeacherId =
+        existingData?['teacherId']?.toString();
+
+        final canEdit =
+            existingUserId == user.uid ||
+                existingTeacherId == teacherId;
+
+        if (!canEdit) {
+          throw Exception(
+            'Anda tidak memiliki akses untuk mengedit diskusi ini.',
+          );
+        }
+
+        await docRef.update(firestoreData);
+
+        debugPrint('DISKUSI BERHASIL DIPERBARUI');
+        debugPrint('DOCUMENT ID: ${widget.discussionId}');
       }
 
       if (!mounted) {
@@ -754,11 +638,7 @@ class _TeacherDiscussionFormScreenState
 
       Navigator.pop(context, true);
     } catch (e) {
-      debugPrint('');
-      debugPrint('======================================');
-      debugPrint('ERROR SAVE DISCUSSION');
-      debugPrint(e.toString());
-      debugPrint('======================================');
+      debugPrint('ERROR SAVE DISCUSSION: $e');
 
       if (mounted) {
         _showMessage(
@@ -792,8 +672,7 @@ class _TeacherDiscussionFormScreenState
       ..showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor:
-          isError ? Colors.red : null,
+          backgroundColor: isError ? Colors.red : null,
         ),
       );
   }
@@ -807,22 +686,21 @@ class _TeacherDiscussionFormScreenState
       key: ValueKey(
         'course_${_selectedCourseId ?? 'none'}_${_courses.length}',
       ),
-      initialValue: _selectedCourseId,
+      initialValue: _courses.any(
+            (course) => course['id'].toString() == _selectedCourseId,
+      )
+          ? _selectedCourseId
+          : null,
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Mata Pelajaran',
         hintText: 'Pilih mata pelajaran',
         border: OutlineInputBorder(),
-        prefixIcon: Icon(
-          Icons.menu_book_rounded,
-        ),
+        prefixIcon: Icon(Icons.menu_book_rounded),
       ),
       items: _courses.map((course) {
-        final id =
-            course['id']?.toString() ?? '';
-
-        final name =
-            course['name']?.toString() ?? '';
+        final id = course['id']?.toString() ?? '';
+        final name = course['name']?.toString() ?? '';
 
         return DropdownMenuItem<String>(
           value: id,
@@ -839,11 +717,8 @@ class _TeacherDiscussionFormScreenState
           return;
         }
 
-        final selected =
-        _courses.firstWhere(
-              (course) =>
-          course['id'].toString() ==
-              value,
+        final selected = _courses.firstWhere(
+              (course) => course['id'].toString() == value,
         );
 
         setState(() {
@@ -854,8 +729,7 @@ class _TeacherDiscussionFormScreenState
 
         debugPrint(
           'COURSE DIPILIH: '
-              '$_selectedCourseId | '
-              '$_selectedCourseName',
+              '$_selectedCourseId | $_selectedCourseName',
         );
       },
     );
@@ -870,22 +744,21 @@ class _TeacherDiscussionFormScreenState
       key: ValueKey(
         'class_${_selectedClassId ?? 'none'}_${_classes.length}',
       ),
-      initialValue: _selectedClassId,
+      initialValue: _classes.any(
+            (item) => item['id'].toString() == _selectedClassId,
+      )
+          ? _selectedClassId
+          : null,
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Kelas',
         hintText: 'Pilih kelas',
         border: OutlineInputBorder(),
-        prefixIcon: Icon(
-          Icons.groups_rounded,
-        ),
+        prefixIcon: Icon(Icons.groups_rounded),
       ),
       items: _classes.map((item) {
-        final id =
-            item['id']?.toString() ?? '';
-
-        final name =
-            item['name']?.toString() ?? '';
+        final id = item['id']?.toString() ?? '';
+        final name = item['name']?.toString() ?? '';
 
         return DropdownMenuItem<String>(
           value: id,
@@ -902,11 +775,8 @@ class _TeacherDiscussionFormScreenState
           return;
         }
 
-        final selected =
-        _classes.firstWhere(
-              (item) =>
-          item['id'].toString() ==
-              value,
+        final selected = _classes.firstWhere(
+              (item) => item['id'].toString() == value,
         );
 
         setState(() {
@@ -917,8 +787,7 @@ class _TeacherDiscussionFormScreenState
 
         debugPrint(
           'KELAS DIPILIH: '
-              '$_selectedClassId | '
-              '$_selectedClassName',
+              '$_selectedClassId | $_selectedClassName',
         );
       },
     );
@@ -935,14 +804,47 @@ class _TeacherDiscussionFormScreenState
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _isEdit
-              ? 'Edit Diskusi'
-              : 'Tambah Diskusi',
+          _isEdit ? 'Edit Diskusi' : 'Tambah Diskusi',
         ),
       ),
       body: _loadingData
           ? const Center(
         child: CircularProgressIndicator(),
+      )
+          : _loadError != null
+          ? SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  size: 48,
+                  color: Colors.red,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _loadError!,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _loadingData = true;
+                      _loadError = null;
+                    });
+                    _loadInitialData();
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Muat Ulang'),
+                ),
+              ],
+            ),
+          ),
+        ),
       )
           : SafeArea(
         child: SingleChildScrollView(
@@ -956,20 +858,12 @@ class _TeacherDiscussionFormScreenState
                 crossAxisAlignment:
                 CrossAxisAlignment.stretch,
                 children: [
-                  // ==================================================
                   // HEADER
-                  // ==================================================
-
                   Container(
-                    padding:
-                    const EdgeInsets.all(18),
+                    padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: theme
-                          .colorScheme
-                          .primary
-                          .withValues(
-                        alpha: 0.08,
-                      ),
+                      color: theme.colorScheme.primary
+                          .withValues(alpha: 0.08),
                       borderRadius:
                       BorderRadius.circular(16),
                     ),
@@ -995,8 +889,7 @@ class _TeacherDiscussionFormScreenState
                                     ? 'Edit Diskusi'
                                     : 'Buat Diskusi Baru',
                                 style: theme
-                                    .textTheme
-                                    .titleLarge
+                                    .textTheme.titleLarge
                                     ?.copyWith(
                                   fontWeight:
                                   FontWeight.bold,
@@ -1008,8 +901,7 @@ class _TeacherDiscussionFormScreenState
                                     'berdasarkan mata pelajaran '
                                     'dan kelas.',
                                 style: theme
-                                    .textTheme
-                                    .bodyMedium,
+                                    .textTheme.bodyMedium,
                               ),
                             ],
                           ),
@@ -1020,18 +912,12 @@ class _TeacherDiscussionFormScreenState
 
                   const SizedBox(height: 24),
 
-                  // ==================================================
                   // GURU
-                  // ==================================================
-
                   InputDecorator(
-                    decoration:
-                    const InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: 'Guru',
-                      border:
-                      OutlineInputBorder(),
-                      prefixIcon:
-                      Icon(Icons.person),
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person),
                     ),
                     child: Text(
                       _teacherName.isEmpty
@@ -1042,16 +928,11 @@ class _TeacherDiscussionFormScreenState
 
                   const SizedBox(height: 16),
 
-                  // ==================================================
                   // TEACHER ID
-                  // ==================================================
-
                   InputDecorator(
-                    decoration:
-                    const InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: 'Teacher ID',
-                      border:
-                      OutlineInputBorder(),
+                      border: OutlineInputBorder(),
                       prefixIcon:
                       Icon(Icons.badge_outlined),
                     ),
@@ -1063,34 +944,22 @@ class _TeacherDiscussionFormScreenState
 
                   const SizedBox(height: 16),
 
-                  // ==================================================
                   // JUDUL
-                  // ==================================================
-
                   TextFormField(
-                    controller:
-                    _titleController,
+                    controller: _titleController,
                     textInputAction:
                     TextInputAction.next,
-                    decoration:
-                    const InputDecoration(
-                      labelText:
-                      'Judul Diskusi',
-                      hintText:
-                      'Contoh: Flutter',
-                      border:
-                      OutlineInputBorder(),
-                      prefixIcon:
-                      Icon(Icons.title),
+                    decoration: const InputDecoration(
+                      labelText: 'Judul Diskusi',
+                      hintText: 'Contoh: Flutter',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.title),
                     ),
                   ),
 
                   const SizedBox(height: 16),
 
-                  // ==================================================
                   // MATA PELAJARAN
-                  // ==================================================
-
                   _buildCourseDropdown(),
 
                   if (_courses.isEmpty) ...[
@@ -1115,8 +984,11 @@ class _TeacherDiscussionFormScreenState
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Mata pelajaran belum ditemukan '
-                                  'di collection courses.',
+                              'Mata pelajaran guru belum '
+                                  'ditemukan di collection '
+                                  'courses. Pastikan field '
+                                  'teacherId sesuai dengan '
+                                  'UID atau document ID guru.',
                             ),
                           ),
                         ],
@@ -1126,10 +998,7 @@ class _TeacherDiscussionFormScreenState
 
                   const SizedBox(height: 16),
 
-                  // ==================================================
                   // KELAS
-                  // ==================================================
-
                   _buildClassDropdown(),
 
                   if (_classes.isEmpty) ...[
@@ -1165,37 +1034,26 @@ class _TeacherDiscussionFormScreenState
 
                   const SizedBox(height: 16),
 
-                  // ==================================================
                   // ISI DISKUSI
-                  // ==================================================
-
                   TextFormField(
-                    controller:
-                    _contentController,
+                    controller: _contentController,
                     minLines: 7,
                     maxLines: 12,
                     textInputAction:
                     TextInputAction.newline,
-                    decoration:
-                    const InputDecoration(
-                      labelText:
-                      'Isi Diskusi',
+                    decoration: const InputDecoration(
+                      labelText: 'Isi Diskusi',
                       hintText:
                       'Tuliskan materi atau pertanyaan '
                           'yang ingin didiskusikan...',
-                      alignLabelWithHint:
-                      true,
-                      border:
-                      OutlineInputBorder(),
-                      prefixIcon:
-                      Padding(
-                        padding:
-                        EdgeInsets.only(
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(),
+                      prefixIcon: Padding(
+                        padding: EdgeInsets.only(
                           bottom: 110,
                         ),
                         child: Icon(
-                          Icons
-                              .description_outlined,
+                          Icons.description_outlined,
                         ),
                       ),
                     ),
@@ -1203,16 +1061,11 @@ class _TeacherDiscussionFormScreenState
 
                   const SizedBox(height: 24),
 
-                  // ==================================================
                   // SAVE BUTTON
-                  // ==================================================
-
                   SizedBox(
                     height: 52,
-                    child:
-                    ElevatedButton.icon(
-                      onPressed:
-                      _loading
+                    child: ElevatedButton.icon(
+                      onPressed: _loading
                           ? null
                           : _saveDiscussion,
                       icon: _loading
@@ -1222,14 +1075,12 @@ class _TeacherDiscussionFormScreenState
                         child:
                         CircularProgressIndicator(
                           strokeWidth: 2,
-                          color:
-                          Colors.white,
+                          color: Colors.white,
                         ),
                       )
                           : Icon(
                         _isEdit
-                            ? Icons
-                            .save_rounded
+                            ? Icons.save_rounded
                             : Icons
                             .add_comment_rounded,
                       ),
@@ -1239,10 +1090,8 @@ class _TeacherDiscussionFormScreenState
                             : _isEdit
                             ? 'Simpan Perubahan'
                             : 'Tambah Diskusi',
-                        style:
-                        const TextStyle(
-                          fontWeight:
-                          FontWeight.w600,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -1252,15 +1101,11 @@ class _TeacherDiscussionFormScreenState
 
                   Text(
                     'Data akan disimpan ke collection discussions.',
-                    textAlign:
-                    TextAlign.center,
-                    style: theme
-                        .textTheme
-                        .bodySmall
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall
                         ?.copyWith(
                       color: theme
-                          .colorScheme
-                          .onSurfaceVariant,
+                          .colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],

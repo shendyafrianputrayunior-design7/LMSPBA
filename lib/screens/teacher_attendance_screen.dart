@@ -27,18 +27,15 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
     _loadData();
   }
 
-  // =========================================================
-  // MENDAPATKAN ID DOKUMEN GURU
-  // =========================================================
-
+  // Mencari ID dokumen guru di koleksi teachers.
   Future<String?> _getTeacherDocumentId() async {
     final user = _auth.currentUser;
     if (user == null) return null;
 
     final userDoc =
     await _firestore.collection('users').doc(user.uid).get();
-
     final userData = userDoc.data() ?? <String, dynamic>{};
+
     final savedTeacherId = userData['teacherId']?.toString().trim();
 
     if (savedTeacherId != null && savedTeacherId.isNotEmpty) {
@@ -47,7 +44,7 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
           .doc(savedTeacherId)
           .get();
 
-      if (teacherDoc.exists) return savedTeacherId;
+      if (teacherDoc.exists) return teacherDoc.id;
     }
 
     final email = user.email?.trim();
@@ -65,10 +62,6 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
     return null;
   }
 
-  // =========================================================
-  // MEMUAT COURSE GURU
-  // =========================================================
-
   Future<void> _loadData() async {
     if (mounted) setState(() => _loading = true);
 
@@ -77,8 +70,11 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
     if (user == null) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
+        _teacherId = null;
+        _teacherIds = [];
+        _teacherName = '';
         _courses = [];
+        _loading = false;
       });
       return;
     }
@@ -88,7 +84,6 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
 
       if (teacherId == null || teacherId.isEmpty) {
         if (!mounted) return;
-
         setState(() {
           _teacherId = null;
           _teacherIds = [];
@@ -96,7 +91,6 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
           _courses = [];
           _loading = false;
         });
-
         _showMessage('Data guru tidak ditemukan.');
         return;
       }
@@ -105,23 +99,28 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
       await _firestore.collection('users').doc(user.uid).get();
       final userData = userDoc.data() ?? <String, dynamic>{};
 
+      final teacherDoc =
+      await _firestore.collection('teachers').doc(teacherId).get();
+      final teacherData = teacherDoc.data() ?? <String, dynamic>{};
+
       final teacherName = (userData['name'] ??
           userData['username'] ??
+          teacherData['name'] ??
+          teacherData['teacherName'] ??
           user.displayName ??
           'Guru')
           .toString();
 
-      final teacherIds = <String>{
-        teacherId,
-        user.uid,
-      }.where((id) => id.isNotEmpty).toList();
+      // Mendukung course lama yang menyimpan UID Auth.
+      final teacherIds = <String>{teacherId, user.uid}
+          .where((id) => id.isNotEmpty)
+          .toList();
 
       final courseSnapshot = await _firestore
           .collection('courses')
           .where('teacherId', whereIn: teacherIds)
           .get();
 
-      // Setiap dokumen course hanya ditampilkan satu kali.
       final courseMap = <String, Map<String, dynamic>>{};
 
       for (final doc in courseSnapshot.docs) {
@@ -129,7 +128,8 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
 
         courseMap[doc.id] = {
           'id': doc.id,
-          'title': (data['title'] ?? 'Course').toString(),
+          'title': (data['title'] ?? data['courseName'] ?? 'Course')
+              .toString(),
           'classId': (data['classId'] ?? '').toString(),
           'className':
           (data['className'] ?? data['classId'] ?? '-').toString(),
@@ -162,10 +162,6 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
     }
   }
 
-  // =========================================================
-  // MEMBUKA DAFTAR PERTEMUAN
-  // =========================================================
-
   Future<void> _openCourse(Map<String, dynamic> course) async {
     if (_teacherId == null) return;
 
@@ -181,7 +177,7 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
       ),
     );
 
-    if (mounted) _loadData();
+    if (mounted) await _loadData();
   }
 
   void _showMessage(String message) {
@@ -221,7 +217,8 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
           padding: const EdgeInsets.all(24),
           children: [
             SizedBox(
-              height: MediaQuery.sizeOf(context).height * 0.18,
+              height:
+              MediaQuery.sizeOf(context).height * 0.18,
             ),
             Icon(
               Icons.menu_book_rounded,
@@ -238,7 +235,8 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Course yang terhubung dengan akun guru akan muncul di sini.',
+              'Course yang terhubung dengan akun guru '
+                  'akan muncul di sini.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colors.onSurfaceVariant,
@@ -248,13 +246,13 @@ class _TeacherAttendanceScreenState extends State<TeacherAttendanceScreen> {
         )
             : ListView.separated(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          padding:
+          const EdgeInsets.fromLTRB(16, 16, 16, 24),
           itemCount: _courses.length,
           separatorBuilder: (_, __) =>
           const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            return _buildCourseCard(_courses[index]);
-          },
+          itemBuilder: (context, index) =>
+              _buildCourseCard(_courses[index]),
         ),
       ),
     );
@@ -375,6 +373,8 @@ class _TeacherAttendanceMeetingsPageState
 
   bool _loading = true;
   bool _creating = false;
+  bool _deleting = false;
+
   List<Map<String, dynamic>> _meetings = [];
 
   String get _courseId => widget.course['id'].toString();
@@ -386,10 +386,6 @@ class _TeacherAttendanceMeetingsPageState
     _loadMeetings();
   }
 
-  // =========================================================
-  // MEMUAT PERTEMUAN BERDASARKAN COURSE
-  // =========================================================
-
   Future<void> _loadMeetings() async {
     if (mounted) setState(() => _loading = true);
 
@@ -399,31 +395,23 @@ class _TeacherAttendanceMeetingsPageState
           .where('courseId', isEqualTo: _courseId)
           .get();
 
-      final meetings = snapshot.docs
-          .where((doc) {
+      final meetings = snapshot.docs.where((doc) {
         final data = doc.data();
-
-        final sessionClassId =
-        (data['classId'] ?? '').toString();
-        final sessionTeacherId =
-        (data['teacherId'] ?? '').toString();
+        final sessionClassId = (data['classId'] ?? '').toString();
+        final sessionTeacherId = (data['teacherId'] ?? '').toString();
 
         return sessionClassId == _classId &&
             widget.teacherIds.contains(sessionTeacherId);
-      })
-          .map((doc) => <String, dynamic>{
+      }).map((doc) => <String, dynamic>{
         'id': doc.id,
         ...doc.data(),
-      })
-          .toList();
+      }).toList();
 
       meetings.sort((a, b) {
-        final aNumber = _meetingNumber(a);
-        final bNumber = _meetingNumber(b);
+        final numberCompare =
+        _meetingNumber(a).compareTo(_meetingNumber(b));
 
-        if (aNumber != bNumber) {
-          return aNumber.compareTo(bNumber);
-        }
+        if (numberCompare != 0) return numberCompare;
 
         return _parseAttendanceDate(a['date'])
             .compareTo(_parseAttendanceDate(b['date']));
@@ -451,10 +439,6 @@ class _TeacherAttendanceMeetingsPageState
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  // =========================================================
-  // MEMBUAT PERTEMUAN
-  // =========================================================
-
   Future<void> _createMeeting() async {
     if (_creating) return;
 
@@ -467,142 +451,134 @@ class _TeacherAttendanceMeetingsPageState
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Buat Pertemuan'),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      widget.course['title'].toString(),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                      ),
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Buat Pertemuan'),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    widget.course['title'].toString(),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: dateController,
-                    readOnly: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Tanggal',
-                      border: OutlineInputBorder(),
-                      suffixIcon: Icon(Icons.calendar_month_rounded),
+                ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  controller: dateController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Tanggal',
+                    border: OutlineInputBorder(),
+                    suffixIcon: Icon(Icons.calendar_month_rounded),
+                  ),
+                  onTap: () async {
+                    final selected = await showDatePicker(
+                      context: dialogContext,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+
+                    if (selected != null) {
+                      dateController.text =
+                          _formatAttendanceDate(selected);
+                    }
+                  },
+                  validator: (value) =>
+                  value == null || value.isEmpty
+                      ? 'Tanggal wajib diisi'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: startController,
+                        readOnly: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Mulai',
+                          border: OutlineInputBorder(),
+                          suffixIcon:
+                          Icon(Icons.access_time_rounded),
+                        ),
+                        onTap: () async {
+                          final time = await showTimePicker(
+                            context: dialogContext,
+                            initialTime:
+                            const TimeOfDay(hour: 7, minute: 0),
+                          );
+
+                          if (time != null) {
+                            startController.text =
+                                _formatAttendanceTime(time);
+                          }
+                        },
+                        validator: (value) =>
+                        value == null || value.isEmpty
+                            ? 'Pilih waktu'
+                            : null,
+                      ),
                     ),
-                    onTap: () async {
-                      final selected = await showDatePicker(
-                        context: dialogContext,
-                        initialDate: DateTime.now(),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2100),
-                      );
-
-                      if (selected != null) {
-                        dateController.text =
-                            _formatAttendanceDate(selected);
-                      }
-                    },
-                    validator: (value) =>
-                    value == null || value.isEmpty
-                        ? 'Tanggal wajib diisi'
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: startController,
-                          readOnly: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Mulai',
-                            border: OutlineInputBorder(),
-                            suffixIcon: Icon(Icons.access_time_rounded),
-                          ),
-                          onTap: () async {
-                            final time = await showTimePicker(
-                              context: dialogContext,
-                              initialTime:
-                              const TimeOfDay(hour: 7, minute: 0),
-                            );
-
-                            if (time != null) {
-                              startController.text =
-                                  _formatAttendanceTime(time);
-                            }
-                          },
-                          validator: (value) =>
-                          value == null || value.isEmpty
-                              ? 'Pilih waktu'
-                              : null,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        controller: endController,
+                        readOnly: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Selesai',
+                          border: OutlineInputBorder(),
+                          suffixIcon:
+                          Icon(Icons.access_time_rounded),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: endController,
-                          readOnly: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Selesai',
-                            border: OutlineInputBorder(),
-                            suffixIcon: Icon(Icons.access_time_rounded),
-                          ),
-                          onTap: () async {
-                            final time = await showTimePicker(
-                              context: dialogContext,
-                              initialTime:
-                              const TimeOfDay(hour: 8, minute: 0),
-                            );
+                        onTap: () async {
+                          final time = await showTimePicker(
+                            context: dialogContext,
+                            initialTime:
+                            const TimeOfDay(hour: 8, minute: 0),
+                          );
 
-                            if (time != null) {
-                              endController.text =
-                                  _formatAttendanceTime(time);
-                            }
-                          },
-                          validator: (value) =>
-                          value == null || value.isEmpty
-                              ? 'Pilih waktu'
-                              : null,
-                        ),
+                          if (time != null) {
+                            endController.text =
+                                _formatAttendanceTime(time);
+                          }
+                        },
+                        validator: (value) =>
+                        value == null || value.isEmpty
+                            ? 'Pilih waktu'
+                            : null,
                       ),
-                    ],
-                  ),
-                ],
-              ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, false),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(dialogContext, true);
-                }
-              },
-              child: const Text('Buat Pertemuan'),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(dialogContext, true);
+              }
+            },
+            child: const Text('Buat Pertemuan'),
+          ),
+        ],
+      ),
     );
 
-    if (result != true) {
-      dateController.dispose();
-      startController.dispose();
-      endController.dispose();
-      return;
-    }
-
-    if (!mounted) {
+    if (result != true || !mounted) {
       dateController.dispose();
       startController.dispose();
       endController.dispose();
@@ -612,13 +588,12 @@ class _TeacherAttendanceMeetingsPageState
     setState(() => _creating = true);
 
     try {
-      // Nomor pertemuan selalu lebih besar daripada nomor yang sudah ada.
       final highestNumber = _meetings.fold<int>(
         0,
-            (highest, meeting) =>
-        _meetingNumber(meeting) > highest
-            ? _meetingNumber(meeting)
-            : highest,
+            (highest, meeting) {
+          final number = _meetingNumber(meeting);
+          return number > highest ? number : highest;
+        },
       );
 
       final nextNumber =
@@ -628,6 +603,7 @@ class _TeacherAttendanceMeetingsPageState
               1;
 
       await _firestore.collection('attendance_sessions').add({
+        // Gunakan ID dokumen guru dari koleksi teachers.
         'teacherId': widget.teacherId,
         'teacherName': widget.teacherName,
         'courseId': _courseId,
@@ -657,10 +633,6 @@ class _TeacherAttendanceMeetingsPageState
     }
   }
 
-  // =========================================================
-  // MEMBUKA DAFTAR SISWA
-  // =========================================================
-
   Future<void> _openMeeting(Map<String, dynamic> meeting) async {
     await Navigator.push(
       context,
@@ -671,14 +643,12 @@ class _TeacherAttendanceMeetingsPageState
       ),
     );
 
-    if (mounted) _loadMeetings();
+    if (mounted) await _loadMeetings();
   }
 
-  // =========================================================
-  // MENGHAPUS PERTEMUAN DAN RECORD ABSENSI
-  // =========================================================
-
   Future<void> _deleteMeeting(Map<String, dynamic> meeting) async {
+    if (_deleting) return;
+
     final sessionId = meeting['id']?.toString() ?? '';
     if (sessionId.isEmpty) return;
 
@@ -687,7 +657,8 @@ class _TeacherAttendanceMeetingsPageState
       builder: (dialogContext) => AlertDialog(
         title: const Text('Hapus Pertemuan?'),
         content: const Text(
-          'Pertemuan dan seluruh catatan absensi siswa di dalamnya akan dihapus.',
+          'Pertemuan dan seluruh catatan absensi siswa '
+              'di dalamnya akan dihapus.',
         ),
         actions: [
           TextButton(
@@ -705,7 +676,9 @@ class _TeacherAttendanceMeetingsPageState
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
+
+    setState(() => _deleting = true);
 
     try {
       final records = await _firestore
@@ -713,7 +686,6 @@ class _TeacherAttendanceMeetingsPageState
           .where('sessionId', isEqualTo: sessionId)
           .get();
 
-      // Batasi jumlah operasi per batch agar aman untuk banyak siswa.
       for (var i = 0; i < records.docs.length; i += 400) {
         final batch = _firestore.batch();
         final end = (i + 400 < records.docs.length)
@@ -737,6 +709,8 @@ class _TeacherAttendanceMeetingsPageState
     } catch (e) {
       debugPrint('Gagal menghapus pertemuan: $e');
       _showMessage('Gagal menghapus pertemuan.');
+    } finally {
+      if (mounted) setState(() => _deleting = false);
     }
   }
 
@@ -786,7 +760,8 @@ class _TeacherAttendanceMeetingsPageState
           padding: const EdgeInsets.all(24),
           children: [
             SizedBox(
-              height: MediaQuery.sizeOf(context).height * 0.16,
+              height:
+              MediaQuery.sizeOf(context).height * 0.16,
             ),
             Icon(
               Icons.calendar_month_rounded,
@@ -804,7 +779,8 @@ class _TeacherAttendanceMeetingsPageState
             ),
             const SizedBox(height: 8),
             Text(
-              'Buat pertemuan pertama untuk ${widget.course['title']}.',
+              'Buat pertemuan pertama untuk '
+                  '${widget.course['title']}.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: colors.onSurfaceVariant,
@@ -815,13 +791,13 @@ class _TeacherAttendanceMeetingsPageState
         )
             : ListView.separated(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          padding:
+          const EdgeInsets.fromLTRB(16, 16, 16, 100),
           itemCount: _meetings.length,
           separatorBuilder: (_, __) =>
           const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            return _buildMeetingCard(_meetings[index]);
-          },
+          itemBuilder: (context, index) =>
+              _buildMeetingCard(_meetings[index]),
         ),
       ),
     );
@@ -874,7 +850,9 @@ class _TeacherAttendanceMeetingsPageState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          number > 0 ? 'Pertemuan $number' : 'Pertemuan',
+                          number > 0
+                              ? 'Pertemuan $number'
+                              : 'Pertemuan',
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
@@ -891,9 +869,7 @@ class _TeacherAttendanceMeetingsPageState
                   ),
                   PopupMenuButton<String>(
                     onSelected: (value) {
-                      if (value == 'delete') {
-                        _deleteMeeting(meeting);
-                      }
+                      if (value == 'delete') _deleteMeeting(meeting);
                     },
                     itemBuilder: (_) => const [
                       PopupMenuItem(
@@ -973,7 +949,7 @@ class _TeacherAttendanceMeetingsPageState
 }
 
 // =====================================================================
-// HALAMAN KELOLA ABSENSI SISWA PADA SATU PERTEMUAN
+// HALAMAN KELOLA ABSENSI SISWA
 // =====================================================================
 
 class _TeacherAttendanceSessionPage extends StatefulWidget {
@@ -1004,8 +980,7 @@ class _TeacherAttendanceSessionPageState
   String get _classId => widget.session['classId']?.toString() ?? '';
 
   bool get _isClosed {
-    final status =
-    widget.session['status']?.toString().toLowerCase();
+    final status = widget.session['status']?.toString().toLowerCase();
     return status == 'closed' || status == 'selesai';
   }
 
@@ -1023,10 +998,6 @@ class _TeacherAttendanceSessionPageState
     super.dispose();
   }
 
-  // =========================================================
-  // MEMUAT SISWA DAN ABSENSI YANG SUDAH TERSIMPAN
-  // =========================================================
-
   Future<void> _loadStudents() async {
     if (mounted) setState(() => _loading = true);
 
@@ -1036,16 +1007,13 @@ class _TeacherAttendanceSessionPageState
           .where('role', isEqualTo: 'student')
           .get();
 
-      final students = snapshot.docs
-          .where((doc) {
+      final students = snapshot.docs.where((doc) {
         final data = doc.data();
         return (data['classId'] ?? '').toString() == _classId;
-      })
-          .map((doc) => <String, dynamic>{
+      }).map((doc) => <String, dynamic>{
         'id': doc.id,
         ...doc.data(),
-      })
-          .toList();
+      }).toList();
 
       students.sort((a, b) {
         final aName =
@@ -1074,7 +1042,6 @@ class _TeacherAttendanceSessionPageState
         }
       }
 
-      // Hindari controller ganda ketika daftar dimuat ulang.
       for (final controller in _noteControllers.values) {
         controller.dispose();
       }
@@ -1085,9 +1052,8 @@ class _TeacherAttendanceSessionPageState
       for (final student in students) {
         final id = student['id'].toString();
         _statuses[id] = savedStatuses[id] ?? 'Alpa';
-        _noteControllers[id] = TextEditingController(
-          text: savedNotes[id] ?? '',
-        );
+        _noteControllers[id] =
+            TextEditingController(text: savedNotes[id] ?? '');
       }
 
       if (!mounted) return;
@@ -1106,26 +1072,23 @@ class _TeacherAttendanceSessionPageState
     }
   }
 
-  // =========================================================
-  // SIMPAN ABSENSI
-  // =========================================================
-
-  Future<void> _saveAttendance() async {
-    if (_isClosed || _saving) return;
+  // true hanya dikembalikan jika semua batch berhasil disimpan.
+  Future<bool> _saveAttendance() async {
+    if (_isClosed || _saving) return false;
 
     if (_students.isEmpty) {
       _showMessage('Tidak ada siswa di kelas ini.');
-      return;
+      return false;
     }
 
     setState(() => _saving = true);
 
     try {
-      // Batasi operasi per batch untuk menghindari batas Firestore.
       for (var i = 0; i < _students.length; i += 400) {
         final batch = _firestore.batch();
-        final end =
-        (i + 400 < _students.length) ? i + 400 : _students.length;
+        final end = (i + 400 < _students.length)
+            ? i + 400
+            : _students.length;
 
         for (final student in _students.sublist(i, end)) {
           final studentId = student['id'].toString();
@@ -1133,12 +1096,9 @@ class _TeacherAttendanceSessionPageState
           (student['name'] ?? student['username'] ?? 'Siswa')
               .toString();
 
-          final status = _statuses[studentId] ?? 'Alpa';
-          final note = _noteControllers[studentId]?.text.trim() ?? '';
-          final docId = '${_sessionId}_$studentId';
-
-          final reference =
-          _firestore.collection('attendance_records').doc(docId);
+          final reference = _firestore
+              .collection('attendance_records')
+              .doc('${_sessionId}_$studentId');
 
           batch.set(
             reference,
@@ -1147,8 +1107,8 @@ class _TeacherAttendanceSessionPageState
               'studentId': studentId,
               'studentName': studentName,
               'classId': _classId,
-              'status': status,
-              'note': note,
+              'status': _statuses[studentId] ?? 'Alpa',
+              'note': _noteControllers[studentId]?.text.trim() ?? '',
               'submittedAt': FieldValue.serverTimestamp(),
               'updatedAt': FieldValue.serverTimestamp(),
             },
@@ -1159,22 +1119,16 @@ class _TeacherAttendanceSessionPageState
         await batch.commit();
       }
 
-      if (!mounted) return;
-      _showMessage('Absensi berhasil disimpan.');
+      if (mounted) _showMessage('Absensi berhasil disimpan.');
+      return true;
     } catch (e) {
       debugPrint('Gagal menyimpan absensi: $e');
-
-      if (!mounted) return;
-      _showMessage('Gagal menyimpan absensi.');
+      if (mounted) _showMessage('Gagal menyimpan absensi.');
+      return false;
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
-
-  // =========================================================
-  // TUTUP ABSENSI
-  // Simpan perubahan terlebih dahulu, lalu tutup sesi.
-  // =========================================================
 
   Future<void> _closeSession() async {
     if (_isClosed || _saving) return;
@@ -1184,7 +1138,8 @@ class _TeacherAttendanceSessionPageState
       builder: (dialogContext) => AlertDialog(
         title: const Text('Tutup Absensi?'),
         content: const Text(
-          'Perubahan absensi akan disimpan terlebih dahulu. Setelah sesi ditutup, absensi tidak dapat diubah lagi melalui halaman ini.',
+          'Absensi akan disimpan terlebih dahulu. Setelah ditutup, '
+              'absensi tidak dapat diubah lagi melalui halaman ini.',
         ),
         actions: [
           TextButton(
@@ -1199,15 +1154,12 @@ class _TeacherAttendanceSessionPageState
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
-    await _saveAttendance();
+    final saved = await _saveAttendance();
 
-    if (!mounted) return;
+    if (!saved || !mounted) return;
 
-    // Jika penyimpanan gagal, jangan tutup sesi.
-    // Status saving sudah kembali false setelah _saveAttendance.
-    // Periksa kembali bahwa data dapat ditulis sebelum mengubah status.
     try {
       await _firestore
           .collection('attendance_sessions')
@@ -1223,9 +1175,7 @@ class _TeacherAttendanceSessionPageState
       Navigator.pop(context);
     } catch (e) {
       debugPrint('Gagal menutup absensi: $e');
-
-      if (!mounted) return;
-      _showMessage('Gagal menutup absensi.');
+      if (mounted) _showMessage('Gagal menutup absensi.');
     }
   }
 
@@ -1255,8 +1205,7 @@ class _TeacherAttendanceSessionPageState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
+    final colors = Theme.of(context).colorScheme;
     final meetingNumber = widget.session['meetingNumber'];
 
     return Scaffold(
@@ -1287,7 +1236,8 @@ class _TeacherAttendanceSessionPageState
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  'Tidak ada siswa yang ditemukan untuk kelas ${widget.session['className'] ?? _classId}.',
+                  'Tidak ada siswa yang ditemukan untuk kelas '
+                      '${widget.session['className'] ?? _classId}.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: colors.onSurfaceVariant,
@@ -1309,9 +1259,8 @@ class _TeacherAttendanceSessionPageState
                 itemCount: _students.length,
                 separatorBuilder: (_, __) =>
                 const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  return _buildStudentCard(_students[index]);
-                },
+                itemBuilder: (context, index) =>
+                    _buildStudentCard(_students[index]),
               ),
             ),
           ),
@@ -1355,10 +1304,6 @@ class _TeacherAttendanceSessionPageState
     );
   }
 
-  // =========================================================
-  // HEADER PERTEMUAN
-  // =========================================================
-
   Widget _buildSessionHeader() {
     final theme = Theme.of(context);
     final meetingNumber = widget.session['meetingNumber'];
@@ -1387,7 +1332,8 @@ class _TeacherAttendanceSessionPageState
           Text('Kelas: ${widget.session['className'] ?? _classId}'),
           Text('Tanggal: ${widget.session['date'] ?? '-'}'),
           Text(
-            'Waktu: ${widget.session['startTime'] ?? '-'} - ${widget.session['endTime'] ?? '-'}',
+            'Waktu: ${widget.session['startTime'] ?? '-'} - '
+                '${widget.session['endTime'] ?? '-'}',
           ),
           if (_isClosed) ...[
             const SizedBox(height: 8),
@@ -1409,10 +1355,6 @@ class _TeacherAttendanceSessionPageState
       ),
     );
   }
-
-  // =========================================================
-  // RINGKASAN ABSENSI
-  // =========================================================
 
   Widget _buildSummary() {
     int hadir = 0;
@@ -1484,10 +1426,6 @@ class _TeacherAttendanceSessionPageState
     );
   }
 
-  // =========================================================
-  // KARTU SISWA
-  // =========================================================
-
   Widget _buildStudentCard(Map<String, dynamic> student) {
     final colors = Theme.of(context).colorScheme;
 
@@ -1502,9 +1440,7 @@ class _TeacherAttendanceSessionPageState
       decoration: BoxDecoration(
         color: colors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: colors.outline.withOpacity(0.3),
-        ),
+        border: Border.all(color: colors.outline.withOpacity(0.3)),
       ),
       child: Column(
         children: [
@@ -1525,9 +1461,7 @@ class _TeacherAttendanceSessionPageState
               Expanded(
                 child: Text(
                   name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
               if (_isClosed)
@@ -1628,9 +1562,9 @@ class _TeacherAttendanceSessionPageState
     final selected = _statuses[studentId] == status;
 
     return InkWell(
-      onTap: () {
-        setState(() => _statuses[studentId] = status);
-      },
+      onTap: _isClosed
+          ? null
+          : () => setState(() => _statuses[studentId] = status),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.symmetric(

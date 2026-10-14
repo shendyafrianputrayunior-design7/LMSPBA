@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-class TeacherScheduleDeleteScreen
-    extends StatefulWidget {
+class TeacherScheduleDeleteScreen extends StatefulWidget {
   final String scheduleId;
   final String subject;
 
@@ -19,21 +19,94 @@ class TeacherScheduleDeleteScreen
 
 class _TeacherScheduleDeleteScreenState
     extends State<TeacherScheduleDeleteScreen> {
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   bool _deleting = false;
 
+  Future<String?> _getTeacherId() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return null;
+    }
+
+    // Ambil data pengguna yang sedang login.
+    final userDoc =
+    await _firestore.collection('users').doc(user.uid).get();
+
+    final userData = userDoc.data();
+
+    // Prioritaskan teacherDocId sesuai struktur pendaftaran guru.
+    final teacherDocId = userData?['teacherDocId']?.toString();
+    if (teacherDocId != null && teacherDocId.isNotEmpty) {
+      return teacherDocId;
+    }
+
+    // Fallback untuk data lama yang menggunakan teacherId.
+    final teacherId = userData?['teacherId']?.toString();
+    if (teacherId != null && teacherId.isNotEmpty) {
+      return teacherId;
+    }
+
+    // Fallback berdasarkan UID jika data pengguna belum menyimpan ID guru.
+    final teacherQuery = await _firestore
+        .collection('teachers')
+        .where('uid', isEqualTo: user.uid)
+        .limit(1)
+        .get();
+
+    if (teacherQuery.docs.isNotEmpty) {
+      return teacherQuery.docs.first.id;
+    }
+
+    return null;
+  }
+
   Future<void> _deleteSchedule() async {
+    if (_deleting) return;
+
     setState(() {
       _deleting = true;
     });
 
     try {
-      await _firestore
-          .collection('schedules')
-          .doc(widget.scheduleId)
-          .delete();
+      final user = _auth.currentUser;
+
+      if (user == null) {
+        throw Exception('Silakan login terlebih dahulu.');
+      }
+
+      final teacherId = await _getTeacherId();
+
+      if (teacherId == null) {
+        throw Exception(
+          'Data guru tidak ditemukan. Silakan periksa profil akun guru.',
+        );
+      }
+
+      // Pastikan jadwal tersedia.
+      final scheduleRef =
+      _firestore.collection('schedules').doc(widget.scheduleId);
+
+      final scheduleDoc = await scheduleRef.get();
+
+      if (!scheduleDoc.exists) {
+        throw Exception('Jadwal sudah tidak tersedia atau telah dihapus.');
+      }
+
+      final scheduleData = scheduleDoc.data();
+      final scheduleTeacherId =
+      scheduleData?['teacherId']?.toString();
+
+      // Pastikan jadwal dimiliki oleh guru yang sedang login.
+      if (scheduleTeacherId != teacherId) {
+        throw Exception(
+          'Anda tidak memiliki izin untuk menghapus jadwal ini.',
+        );
+      }
+
+      await scheduleRef.delete();
 
       if (!mounted) return;
 
@@ -48,7 +121,7 @@ class _TeacherScheduleDeleteScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Gagal menghapus jadwal: $e',
+            'Gagal menghapus jadwal: ${e.toString().replaceFirst('Exception: ', '')}',
           ),
         ),
       );
@@ -65,33 +138,26 @@ class _TeacherScheduleDeleteScreenState
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints:
-            const BoxConstraints(
+            constraints: const BoxConstraints(
               maxWidth: 500,
             ),
             child: Card(
               child: Padding(
-                padding:
-                const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 child: Column(
-                  mainAxisSize:
-                  MainAxisSize.min,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
                       width: 72,
                       height: 72,
-                      decoration:
-                      BoxDecoration(
-                        color: Colors.red
-                            .withValues(
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(
                           alpha: 0.1,
                         ),
-                        shape:
-                        BoxShape.circle,
+                        shape: BoxShape.circle,
                       ),
                       child: const Icon(
-                        Icons
-                            .delete_outline,
+                        Icons.delete_outline,
                         size: 40,
                         color: Colors.red,
                       ),
@@ -103,8 +169,7 @@ class _TeacherScheduleDeleteScreenState
                       'Hapus Jadwal?',
                       style: TextStyle(
                         fontSize: 22,
-                        fontWeight:
-                        FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
 
@@ -112,44 +177,29 @@ class _TeacherScheduleDeleteScreenState
 
                     Text(
                       'Apakah kamu yakin ingin menghapus jadwal berikut?',
-                      textAlign:
-                      TextAlign.center,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        color:
-                        Colors.grey.shade600,
+                        color: Colors.grey.shade600,
                       ),
                     ),
 
                     const SizedBox(height: 16),
 
                     Container(
-                      width:
-                      double.infinity,
-                      padding:
-                      const EdgeInsets.all(
-                        16,
-                      ),
-                      decoration:
-                      BoxDecoration(
-                        color: Colors.grey
-                            .withValues(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(
                           alpha: 0.08,
                         ),
-                        borderRadius:
-                        BorderRadius
-                            .circular(
-                          12,
-                        ),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         widget.subject,
-                        textAlign:
-                        TextAlign.center,
-                        style:
-                        const TextStyle(
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
                           fontSize: 16,
-                          fontWeight:
-                          FontWeight.w600,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -157,38 +207,24 @@ class _TeacherScheduleDeleteScreenState
                     const SizedBox(height: 24),
 
                     SizedBox(
-                      width:
-                      double.infinity,
+                      width: double.infinity,
                       height: 50,
-                      child:
-                      ElevatedButton
-                          .icon(
-                        onPressed: _deleting
-                            ? null
-                            : _deleteSchedule,
-                        style:
-                        ElevatedButton
-                            .styleFrom(
-                          backgroundColor:
-                          Colors.red,
-                          foregroundColor:
-                          Colors.white,
+                      child: ElevatedButton.icon(
+                        onPressed: _deleting ? null : _deleteSchedule,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
                         ),
                         icon: _deleting
                             ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child:
-                          CircularProgressIndicator(
-                            color:
-                            Colors.white,
-                            strokeWidth:
-                            2,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
                           ),
                         )
-                            : const Icon(
-                          Icons.delete,
-                        ),
+                            : const Icon(Icons.delete),
                         label: Text(
                           _deleting
                               ? 'Menghapus...'
@@ -200,21 +236,13 @@ class _TeacherScheduleDeleteScreenState
                     const SizedBox(height: 12),
 
                     SizedBox(
-                      width:
-                      double.infinity,
+                      width: double.infinity,
                       height: 50,
-                      child:
-                      OutlinedButton(
+                      child: OutlinedButton(
                         onPressed: _deleting
                             ? null
-                            : () =>
-                            Navigator.pop(
-                              context,
-                            ),
-                        child:
-                        const Text(
-                          'Batal',
-                        ),
+                            : () => Navigator.pop(context),
+                        child: const Text('Batal'),
                       ),
                     ),
                   ],

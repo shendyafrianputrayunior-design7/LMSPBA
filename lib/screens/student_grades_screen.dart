@@ -25,12 +25,12 @@ class _StudentGradesScreenState extends State<StudentGradesScreen> {
   }
 
   Future<void> _loadGrades() async {
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
+    if (!mounted) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     try {
       final user = _auth.currentUser;
@@ -39,20 +39,19 @@ class _StudentGradesScreenState extends State<StudentGradesScreen> {
         throw Exception('Silakan login terlebih dahulu.');
       }
 
-      // Ambil nilai berdasarkan UID akun siswa.
+      // Ambil nilai dari koleksi grades milik siswa yang login.
       final snapshot = await _firestore
-          .collection('student_grades')
+          .collection('grades')
           .where('studentId', isEqualTo: user.uid)
           .get();
 
-      final grades = snapshot.docs
-          .map((doc) {
+      final grades = snapshot.docs.map((doc) {
         final data = doc.data();
-        final score = data['finalScore'];
 
-        if (score is! num) {
-          return null;
-        }
+        // Mendukung data nilai lama dan baru.
+        final rawScore = data['finalScore'] ?? data['score'];
+
+        if (rawScore is! num) return null;
 
         return <String, dynamic>{
           'id': doc.id,
@@ -60,20 +59,16 @@ class _StudentGradesScreenState extends State<StudentGradesScreen> {
           'courseName': data['courseName'] ??
               data['courseTitle'] ??
               'Mata Pelajaran',
-          'finalScore': score,
+          'finalScore': rawScore,
           'updatedAt': data['updatedAt'],
         };
-      })
-          .whereType<Map<String, dynamic>>()
-          .toList();
+      }).whereType<Map<String, dynamic>>().toList();
 
       grades.sort((a, b) {
-        final nameA = (a['courseName'] ?? '')
-            .toString()
-            .toLowerCase();
-        final nameB = (b['courseName'] ?? '')
-            .toString()
-            .toLowerCase();
+        final nameA =
+        (a['courseName'] ?? '').toString().toLowerCase();
+        final nameB =
+        (b['courseName'] ?? '').toString().toLowerCase();
 
         return nameA.compareTo(nameB);
       });
@@ -83,7 +78,6 @@ class _StudentGradesScreenState extends State<StudentGradesScreen> {
       setState(() {
         _grades = grades;
         _loading = false;
-        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -137,9 +131,7 @@ class _StudentGradesScreenState extends State<StudentGradesScreen> {
         ],
       ),
       body: _loading
-          ? const Center(
-        child: CircularProgressIndicator(),
-      )
+          ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? _buildError()
           : RefreshIndicator(
@@ -274,8 +266,8 @@ class _StudentGradesScreenState extends State<StudentGradesScreen> {
 
   Widget _buildGradeCard(Map<String, dynamic> grade) {
     final score = (grade['finalScore'] as num).toDouble();
-    final courseName = (grade['courseName'] ?? 'Mata Pelajaran')
-        .toString();
+    final courseName =
+    (grade['courseName'] ?? 'Mata Pelajaran').toString();
     final color = _scoreColor(score);
 
     return Card(

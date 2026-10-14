@@ -1,3 +1,4 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -14,16 +15,11 @@ class TeacherMaterialsScreen extends StatefulWidget {
 }
 
 class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
-  // ============================================================
-  // FIXED TEACHER ID
-  // ============================================================
-
-  static const String _fixedTeacherId = 'teacher_001';
-
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String _teacherName = 'Guru';
+  String _teacherId = '';
 
   bool _loadingTeacher = true;
   bool _loadingMaterials = true;
@@ -40,70 +36,122 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
   // LOAD TEACHER PROFILE
   // ============================================================
 
-  Future<void> _loadTeacherProfile() async {
-    final user = _auth.currentUser;
+  Future<Map<String, dynamic>?> _getTeacherProfile(User user) async {
+    // Cara pertama: cari berdasarkan UID Firebase Authentication.
+    final userDoc = await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .get();
 
-    String teacherName = 'Guru';
+    if (userDoc.exists) {
+      return userDoc.data();
+    }
 
-    if (user != null) {
-      try {
-        final snapshot = await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .get();
+    // Cara kedua: cari berdasarkan email jika ID dokumen berbeda.
+    if (user.email != null && user.email!.isNotEmpty) {
+      final query = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
+          .get();
 
-        if (snapshot.exists) {
-          final data = snapshot.data() ?? {};
-
-          teacherName = (
-              data['name'] ??
-                  data['username'] ??
-                  data['displayName'] ??
-                  user.displayName ??
-                  'Guru'
-          ).toString();
-        } else {
-          teacherName = user.displayName ?? 'Guru';
-        }
-      } catch (_) {
-        teacherName = user.displayName ?? 'Guru';
+      if (query.docs.isNotEmpty) {
+        return query.docs.first.data();
       }
     }
 
-    if (!mounted) return;
+    return null;
+  }
 
-    setState(() {
-      _teacherName =
-      teacherName.trim().isEmpty ? 'Guru' : teacherName.trim();
+  Future<void> _loadTeacherProfile() async {
+    final user = _auth.currentUser;
 
-      _loadingTeacher = false;
-    });
+    if (user == null) {
+      if (!mounted) return;
 
-    await _loadAllMaterials();
+      setState(() {
+        _teacherName = 'Guru';
+        _teacherId = '';
+        _loadingTeacher = false;
+        _loadingMaterials = false;
+        _items = [];
+      });
+
+      return;
+    }
+
+    try {
+      final profileData = await _getTeacherProfile(user);
+
+      final name = (
+          profileData?['username'] ??
+              profileData?['name'] ??
+              profileData?['displayName'] ??
+              user.displayName ??
+              'Guru'
+      ).toString().trim();
+
+      final teacherId = (
+          profileData?['teacherId'] ??
+              profileData?['teacherDocId'] ??
+              profileData?['idGuru'] ??
+              ''
+      ).toString().trim();
+
+      debugPrint('========== PROFIL GURU MATERI ==========');
+      debugPrint('Auth UID   : ${user.uid}');
+      debugPrint('Email      : ${user.email}');
+      debugPrint('Nama       : $name');
+      debugPrint('Teacher ID : $teacherId');
+      debugPrint('Profil     : $profileData');
+      debugPrint('========================================');
+
+      if (!mounted) return;
+
+      setState(() {
+        _teacherName = name.isEmpty ? 'Guru' : name;
+        _teacherId = teacherId;
+        _loadingTeacher = false;
+      });
+
+      await _loadAllMaterials();
+    } catch (e) {
+      debugPrint('Gagal memuat profil guru: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _teacherName = user.displayName ?? 'Guru';
+        _teacherId = '';
+        _loadingTeacher = false;
+        _loadingMaterials = false;
+        _items = [];
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal memuat profil guru: $e')),
+      );
+    }
   }
 
   // ============================================================
-  // LOAD ALL MATERIALS
-  //
-  // PENTING:
-  //
-  // COLLECTION "materials" ADALAH SUMBER UTAMA CARD/MENU.
-  //
-  // course_lessons HANYA DIGUNAKAN UNTUK MENCARI VIDEO
-  // YANG TERHUBUNG DENGAN MATERIAL.
-  //
-  // course_lessons TIDAK AKAN DIBUAT MENJADI CARD SENDIRI.
-  //
-  // HASIL:
-  //
-  // 1 MATERIAL
-  // ├── URL materi
-  // └── Video
-  //
-  // menjadi 1 card.
+  // LOAD MATERIALS USING FIRESTORE TEACHER ID
   // ============================================================
 
   Future<void> _loadAllMaterials() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      if (!mounted) return;
+
+      setState(() {
+        _items = [];
+        _loadingMaterials = false;
+      });
+
+      return;
+    }
+
     if (mounted) {
       setState(() {
         _loadingMaterials = true;
@@ -111,29 +159,52 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
     }
 
     try {
+      // Jika Teacher ID belum tersedia, muat ulang profil guru.
+      String teacherId = _teacherId.trim();
+
+      if (teacherId.isEmpty) {
+        final profileData = await _getTeacherProfile(user);
+
+        teacherId = (
+            profileData?['teacherId'] ??
+                profileData?['teacherDocId'] ??
+                profileData?['idGuru'] ??
+                ''
+        ).toString().trim();
+
+        if (teacherId.isNotEmpty && mounted) {
+          setState(() {
+            _teacherId = teacherId;
+          });
+        }
+      }
+
+      debugPrint('========== CEK MATERI GURU ==========');
+      debugPrint('Auth UID   : ${user.uid}');
+      debugPrint('Teacher ID : $teacherId');
+
+      if (teacherId.isEmpty) {
+        throw Exception(
+          'teacherId tidak ditemukan pada profil guru di koleksi users.',
+        );
+      }
+
       final materialSnapshot = await _firestore
           .collection('materials')
-          .where(
-        'teacherId',
-        isEqualTo: _fixedTeacherId,
-      )
+          .where('teacherId', isEqualTo: teacherId)
           .get();
 
-      final List<_MaterialItem> allItems = [];
+      debugPrint(
+        'Jumlah materi ditemukan: ${materialSnapshot.docs.length}',
+      );
 
-      // ==========================================================
-      // LOAD MATERIALS
-      // ==========================================================
+      final List<_MaterialItem> allItems = [];
 
       for (final materialDoc in materialSnapshot.docs) {
         final Map<String, dynamic> data =
         Map<String, dynamic>.from(materialDoc.data());
 
         final String materialId = materialDoc.id;
-
-        // --------------------------------------------------------
-        // FIELD MATERIAL
-        // --------------------------------------------------------
 
         final String courseId =
         (data['courseId'] ?? '').toString().trim();
@@ -152,26 +223,19 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
 
         dynamic videoSize = data['videoSize'] ?? 0;
 
-        String resolvedCourseLessonId = courseLessonId;
-
-        // ========================================================
-        // CARI VIDEO YANG TERHUBUNG
-        // ========================================================
+        debugPrint(
+          'Materi: $materialTitle | ID: $materialId | '
+              'Course: $courseId',
+        );
 
         if (courseId.isNotEmpty) {
-          final _ResolvedVideo? resolvedVideo =
-          await _resolveVideoForMaterial(
+          final resolvedVideo = await _resolveVideoForMaterial(
             courseId: courseId,
             courseLessonId: courseLessonId,
             materialTitle: materialTitle,
           );
 
           if (resolvedVideo != null) {
-            // ----------------------------------------------------
-            // Kalau material belum mempunyai video,
-            // gunakan video dari course_lessons.
-            // ----------------------------------------------------
-
             if (videoUrl.isEmpty) {
               videoUrl = resolvedVideo.videoUrl;
             }
@@ -184,16 +248,6 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                 resolvedVideo.videoSize > 0) {
               videoSize = resolvedVideo.videoSize;
             }
-
-            resolvedCourseLessonId =
-                resolvedVideo.lessonId;
-
-            // ----------------------------------------------------
-            // UPDATE MATERIAL
-            //
-            // Ini penting supaya hubungan material -> video
-            // tersimpan permanen.
-            // ----------------------------------------------------
 
             final bool needsMigration =
                 courseLessonId != resolvedVideo.lessonId ||
@@ -208,63 +262,43 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
 
             if (needsMigration) {
               try {
-                final Map<String, dynamic> migrationData = {
+                await _firestore
+                    .collection('materials')
+                    .doc(materialId)
+                    .update({
                   'courseLessonId': resolvedVideo.lessonId,
                   'videoUrl': resolvedVideo.videoUrl,
                   'videoFileName': resolvedVideo.videoFileName,
                   'videoSize': resolvedVideo.videoSize,
                   'updatedAt': FieldValue.serverTimestamp(),
-                };
+                });
 
-                await _firestore
-                    .collection('materials')
-                    .doc(materialId)
-                    .update(migrationData);
-
-                // Update data lokal juga.
                 data.addAll({
-                  'courseLessonId':
-                  resolvedVideo.lessonId,
-                  'videoUrl':
-                  resolvedVideo.videoUrl,
-                  'videoFileName':
-                  resolvedVideo.videoFileName,
-                  'videoSize':
-                  resolvedVideo.videoSize,
+                  'courseLessonId': resolvedVideo.lessonId,
+                  'videoUrl': resolvedVideo.videoUrl,
+                  'videoFileName': resolvedVideo.videoFileName,
+                  'videoSize': resolvedVideo.videoSize,
                 });
               } catch (e) {
                 debugPrint(
-                  'Gagal migrasi video material '
-                      '$materialId: $e',
+                  'Gagal migrasi video material $materialId: $e',
                 );
 
-                // Walaupun migrasi gagal, data tetap
-                // ditampilkan menggunakan hasil resolver.
-                data['courseLessonId'] =
-                    resolvedVideo.lessonId;
-                data['videoUrl'] =
-                    resolvedVideo.videoUrl;
+                // Materi tetap ditampilkan meskipun migrasi gagal.
+                data['courseLessonId'] = resolvedVideo.lessonId;
+                data['videoUrl'] = resolvedVideo.videoUrl;
                 data['videoFileName'] =
                     resolvedVideo.videoFileName;
-                data['videoSize'] =
-                    resolvedVideo.videoSize;
+                data['videoSize'] = resolvedVideo.videoSize;
               }
             } else {
-              data['courseLessonId'] =
-                  resolvedVideo.lessonId;
-              data['videoUrl'] =
-                  resolvedVideo.videoUrl;
-              data['videoFileName'] =
-                  resolvedVideo.videoFileName;
-              data['videoSize'] =
-                  resolvedVideo.videoSize;
+              data['courseLessonId'] = resolvedVideo.lessonId;
+              data['videoUrl'] = resolvedVideo.videoUrl;
+              data['videoFileName'] = resolvedVideo.videoFileName;
+              data['videoSize'] = resolvedVideo.videoSize;
             }
           }
         }
-
-        // ========================================================
-        // MASUKKAN SATU CARD MATERIAL
-        // ========================================================
 
         allItems.add(
           _MaterialItem(
@@ -275,36 +309,32 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
       }
 
       // ==========================================================
-      // SORT
+      // SORT MATERIALS
       // ==========================================================
 
       allItems.sort((a, b) {
         final aCreated = a.data['createdAt'];
         final bCreated = b.data['createdAt'];
 
-        if (aCreated is Timestamp &&
-            bCreated is Timestamp) {
+        if (aCreated is Timestamp && bCreated is Timestamp) {
           return bCreated.compareTo(aCreated);
         }
 
         final aUpdated = a.data['updatedAt'];
         final bUpdated = b.data['updatedAt'];
 
-        if (aUpdated is Timestamp &&
-            bUpdated is Timestamp) {
+        if (aUpdated is Timestamp && bUpdated is Timestamp) {
           return bUpdated.compareTo(aUpdated);
         }
 
-        if (aCreated is Timestamp) {
-          return -1;
-        }
-
-        if (bCreated is Timestamp) {
-          return 1;
-        }
+        if (aCreated is Timestamp) return -1;
+        if (bCreated is Timestamp) return 1;
 
         return 0;
       });
+
+      debugPrint('Materi siap ditampilkan: ${allItems.length}');
+      debugPrint('====================================');
 
       if (!mounted) return;
 
@@ -313,20 +343,20 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
         _loadingMaterials = false;
       });
     } catch (e) {
+      debugPrint('Gagal memuat materi: $e');
+
       if (!mounted) return;
 
       setState(() {
+        _items = [];
         _loadingMaterials = false;
       });
 
-      ScaffoldMessenger.of(context)
-          .hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Gagal memuat materi: $e',
-          ),
+          content: Text('Gagal memuat materi: $e'),
         ),
       );
     }
@@ -334,15 +364,6 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
 
   // ============================================================
   // RESOLVE VIDEO
-  //
-  // URUTAN PENCARIAN:
-  //
-  // 1. courseLessonId
-  // 2. title material == title lesson
-  // 3. hanya ada satu video pada course
-  //
-  // Dengan cara ini video lama yang courseLessonId-nya kosong
-  // tetap bisa ditemukan.
   // ============================================================
 
   Future<_ResolvedVideo?> _resolveVideoForMaterial({
@@ -351,10 +372,7 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
     required String materialTitle,
   }) async {
     try {
-      // ========================================================
-      // 1. EXACT COURSE LESSON ID
-      // ========================================================
-
+      // 1. Cari berdasarkan courseLessonId.
       if (courseLessonId.isNotEmpty) {
         final lessonDoc = await _firestore
             .collection('course_lessons')
@@ -365,7 +383,7 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
           final data = lessonDoc.data();
 
           if (data != null) {
-            final String videoUrl =
+            final videoUrl =
             (data['videoUrl'] ?? '').toString().trim();
 
             if (videoUrl.isNotEmpty) {
@@ -373,28 +391,18 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                 lessonId: lessonDoc.id,
                 videoUrl: videoUrl,
                 videoFileName:
-                (data['videoFileName'] ?? '')
-                    .toString()
-                    .trim(),
-                videoSize: _toInt(
-                  data['videoSize'],
-                ),
+                (data['videoFileName'] ?? '').toString().trim(),
+                videoSize: _toInt(data['videoSize']),
               );
             }
           }
         }
       }
 
-      // ========================================================
-      // 2. AMBIL SEMUA LESSON DALAM COURSE
-      // ========================================================
-
+      // 2. Cari lesson pada course yang sama.
       final lessonSnapshot = await _firestore
           .collection('course_lessons')
-          .where(
-        'courseId',
-        isEqualTo: courseId,
-      )
+          .where('courseId', isEqualTo: courseId)
           .get();
 
       final List<_ResolvedVideo> videos = [];
@@ -402,96 +410,63 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
       for (final lessonDoc in lessonSnapshot.docs) {
         final data = lessonDoc.data();
 
-        final String videoUrl =
+        final videoUrl =
         (data['videoUrl'] ?? '').toString().trim();
 
-        if (videoUrl.isEmpty) {
-          continue;
-        }
+        if (videoUrl.isEmpty) continue;
 
         videos.add(
           _ResolvedVideo(
             lessonId: lessonDoc.id,
             videoUrl: videoUrl,
             videoFileName:
-            (data['videoFileName'] ?? '')
-                .toString()
-                .trim(),
-            videoSize: _toInt(
-              data['videoSize'],
-            ),
+            (data['videoFileName'] ?? '').toString().trim(),
+            videoSize: _toInt(data['videoSize']),
           ),
         );
       }
 
-      if (videos.isEmpty) {
-        return null;
-      }
+      if (videos.isEmpty) return null;
 
-      // ========================================================
-      // 3. CARI BERDASARKAN TITLE
-      // ========================================================
-
-      final String normalizedMaterialTitle =
+      // 3. Cari berdasarkan judul materi.
+      final normalizedMaterialTitle =
       materialTitle.trim().toLowerCase();
 
       if (normalizedMaterialTitle.isNotEmpty) {
         for (final lessonDoc in lessonSnapshot.docs) {
           final data = lessonDoc.data();
 
-          final String videoUrl =
+          final videoUrl =
           (data['videoUrl'] ?? '').toString().trim();
 
-          if (videoUrl.isEmpty) {
-            continue;
-          }
+          if (videoUrl.isEmpty) continue;
 
-          final String lessonTitle =
-          (
+          final lessonTitle = (
               data['title'] ??
                   data['lessonTitle'] ??
                   ''
           ).toString().trim().toLowerCase();
 
-          if (lessonTitle.isNotEmpty &&
-              lessonTitle == normalizedMaterialTitle) {
+          if (lessonTitle == normalizedMaterialTitle) {
             return _ResolvedVideo(
               lessonId: lessonDoc.id,
               videoUrl: videoUrl,
               videoFileName:
-              (data['videoFileName'] ?? '')
-                  .toString()
-                  .trim(),
-              videoSize: _toInt(
-                data['videoSize'],
-              ),
+              (data['videoFileName'] ?? '').toString().trim(),
+              videoSize: _toInt(data['videoSize']),
             );
           }
         }
       }
 
-      // ========================================================
-      // 4. JIKA HANYA ADA SATU VIDEO
-      //
-      // Ini khusus untuk data lama yang courseLessonId-nya
-      // belum tersimpan.
-      // ========================================================
-
+      // 4. Jika hanya ada satu video, gunakan video tersebut.
       if (videos.length == 1) {
         return videos.first;
       }
 
-      // ========================================================
-      // Jika lebih dari satu video dan tidak ada title yang
-      // cocok, jangan memilih secara sembarangan.
-      // ========================================================
-
       return null;
     } catch (e) {
-      debugPrint(
-        'Gagal resolve video untuk course $courseId: $e',
-      );
-
+      debugPrint('Gagal resolve video untuk course $courseId: $e');
       return null;
     }
   }
@@ -519,8 +494,7 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -557,14 +531,11 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Materi berhasil dihapus.',
-          ),
+          content: Text('Materi berhasil dihapus.'),
         ),
       );
     }
@@ -582,38 +553,29 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
       appBar: AppBar(
         title: const Text(
           'Materi Pembelajaran',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loadAllMaterials,
-            icon: const Icon(
-              Icons.refresh,
-            ),
+            icon: const Icon(Icons.refresh),
           ),
           IconButton(
             tooltip: 'Tambah Materi',
             onPressed: () => _openMaterialForm(),
-            icon: const Icon(
-              Icons.add,
-            ),
+            icon: const Icon(Icons.add),
           ),
         ],
       ),
       body: _loadingTeacher || _loadingMaterials
-          ? const Center(
-        child: CircularProgressIndicator(),
-      )
+          ? const Center(child: CircularProgressIndicator())
           : _items.isEmpty
           ? _buildEmpty(theme)
           : RefreshIndicator(
         onRefresh: _loadAllMaterials,
         child: ListView.builder(
-          physics:
-          const AlwaysScrollableScrollPhysics(),
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             16,
             16,
@@ -623,23 +585,14 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
           itemCount: _items.length,
           itemBuilder: (context, index) {
             final item = _items[index];
-
-            return _buildMaterialCard(
-              item.id,
-              item.data,
-            );
+            return _buildMaterialCard(item.id, item.data);
           },
         ),
       ),
-      floatingActionButton:
-      FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openMaterialForm(),
-        icon: const Icon(
-          Icons.add,
-        ),
-        label: const Text(
-          'Tambah Materi',
-        ),
+        icon: const Icon(Icons.add),
+        label: const Text('Tambah Materi'),
       ),
     );
   }
@@ -654,187 +607,124 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
       ) {
     final theme = Theme.of(context);
 
-    final title =
-    (data['title'] ?? 'Materi').toString();
+    final title = (data['title'] ?? 'Materi').toString();
+    final subject = (data['subject'] ?? '').toString();
 
-    final subject =
-    (data['subject'] ?? '').toString();
-
-    final description =
-    (
+    final description = (
         data['description'] ??
             data['content'] ??
             ''
     ).toString();
 
-    final content =
-    (data['content'] ?? '').toString();
+    final content = (data['content'] ?? '').toString();
 
-    final courseName =
-    (
+    final courseName = (
         data['courseName'] ??
             data['courseTitle'] ??
             ''
     ).toString();
 
-    final classId =
-    (data['classId'] ?? '').toString();
+    final classId = (data['classId'] ?? '').toString();
+    final className = (data['className'] ?? '').toString();
 
-    final className =
-    (data['className'] ?? '').toString();
-
-    final displayClass =
-    className.trim().isNotEmpty
+    final displayClass = className.trim().isNotEmpty
         ? className
         : _classNameFromId(classId);
 
-    final type =
-    (data['type'] ?? 'Materi').toString();
+    final type = (data['type'] ?? 'Materi').toString();
 
-    final videoUrl =
-    (data['videoUrl'] ?? '')
-        .toString()
-        .trim();
-
+    final videoUrl = (data['videoUrl'] ?? '').toString().trim();
     final videoFileName =
-    (data['videoFileName'] ?? '')
-        .toString();
+    (data['videoFileName'] ?? '').toString();
+    final videoSize = data['videoSize'];
 
-    final videoSize =
-    data['videoSize'];
+    final hasVideo = videoUrl.isNotEmpty;
 
-    final bool hasVideo =
-        videoUrl.isNotEmpty;
-
-    final attachmentUrl =
-    (
+    final attachmentUrl = (
         data['attachmentUrl'] ??
             data['fileUrl'] ??
             ''
     ).toString().trim();
 
-    final bool hasAttachment =
-        attachmentUrl.isNotEmpty;
+    final hasAttachment = attachmentUrl.isNotEmpty;
 
     final courseLessonId =
-    (data['courseLessonId'] ?? '')
-        .toString()
-        .trim();
+    (data['courseLessonId'] ?? '').toString().trim();
 
     IconData typeIcon;
 
     switch (type) {
       case 'Video':
-        typeIcon =
-            Icons.play_circle_outline;
+        typeIcon = Icons.play_circle_outline;
         break;
-
       case 'PDF':
-        typeIcon =
-            Icons.picture_as_pdf_outlined;
+        typeIcon = Icons.picture_as_pdf_outlined;
         break;
-
       case 'Dokumen':
-        typeIcon =
-            Icons.description_outlined;
+        typeIcon = Icons.description_outlined;
         break;
-
       case 'Link':
-        typeIcon =
-            Icons.link_rounded;
+        typeIcon = Icons.link_rounded;
         break;
-
       default:
-        typeIcon =
-            Icons.menu_book_outlined;
+        typeIcon = Icons.menu_book_outlined;
     }
 
     return Card(
-      margin: const EdgeInsets.only(
-        bottom: 14,
-      ),
+      margin: const EdgeInsets.only(bottom: 14),
       elevation: 1,
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ==================================================
-            // HEADER
-            // ==================================================
-
             Row(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: 50,
                   height: 50,
                   decoration: BoxDecoration(
-                    color: theme
-                        .colorScheme
-                        .primary
-                        .withValues(
+                    color: theme.colorScheme.primary.withValues(
                       alpha: 0.1,
                     ),
-                    borderRadius:
-                    BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(
                     typeIcon,
-                    color:
-                    theme.colorScheme.primary,
+                    color: theme.colorScheme.primary,
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         title,
                         maxLines: 2,
-                        overflow:
-                        TextOverflow.ellipsis,
-                        style:
-                        const TextStyle(
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
                           fontSize: 17,
-                          fontWeight:
-                          FontWeight.bold,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-
-                      if (subject
-                          .trim()
-                          .isNotEmpty) ...[
+                      if (subject.trim().isNotEmpty) ...[
                         const SizedBox(height: 5),
                         Text(
                           subject,
                           maxLines: 1,
-                          overflow:
-                          TextOverflow.ellipsis,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: theme
-                                .colorScheme
-                                .primary,
-                            fontWeight:
-                            FontWeight.w600,
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ],
                   ),
                 ),
-
-                // ==================================================
-                // MENU
-                // ==================================================
-
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'edit') {
@@ -842,104 +732,66 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                         materialId: materialId,
                         data: data,
                       );
-                    }
-
-                    if (value == 'delete') {
-                      _openDeleteMaterial(
-                        materialId,
-                        title,
-                      );
+                    } else if (value == 'delete') {
+                      _openDeleteMaterial(materialId, title);
                     }
                   },
-                  itemBuilder: (context) {
-                    return const [
-                      PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.edit_outlined,
-                            ),
-                            SizedBox(width: 10),
-                            Text('Edit'),
-                          ],
-                        ),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined),
+                          SizedBox(width: 10),
+                          Text('Edit'),
+                        ],
                       ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete_outline,
-                              color: Colors.red,
-                            ),
-                            SizedBox(width: 10),
-                            Text(
-                              'Hapus',
-                              style: TextStyle(
-                                color: Colors.red,
-                              ),
-                            ),
-                          ],
-                        ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline, color: Colors.red),
+                          SizedBox(width: 10),
+                          Text(
+                            'Hapus',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ],
                       ),
-                    ];
-                  },
+                    ),
+                  ],
                 ),
               ],
             ),
 
-            // ==================================================
-            // COURSE + CLASS
-            // ==================================================
-
-            if (courseName
-                .trim()
-                .isNotEmpty ||
-                displayClass
-                    .trim()
-                    .isNotEmpty) ...[
+            if (courseName.trim().isNotEmpty ||
+                displayClass.trim().isNotEmpty) ...[
               const SizedBox(height: 14),
-
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  if (courseName
-                      .trim()
-                      .isNotEmpty)
+                  if (courseName.trim().isNotEmpty)
                     _buildInfoChip(
-                      icon:
-                      Icons.school_outlined,
+                      icon: Icons.school_outlined,
                       text: courseName,
                     ),
-
-                  if (displayClass
-                      .trim()
-                      .isNotEmpty)
+                  if (displayClass.trim().isNotEmpty)
                     _buildInfoChip(
-                      icon:
-                      Icons.class_outlined,
+                      icon: Icons.class_outlined,
                       text: displayClass,
                     ),
                 ],
               ),
             ],
 
-            // ==================================================
-            // DESCRIPTION
-            // ==================================================
-
-            if (description
-                .trim()
-                .isNotEmpty) ...[
+            if (description.trim().isNotEmpty) ...[
               const SizedBox(height: 14),
-
               Text(
                 description,
                 maxLines: 3,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Colors.grey.shade700,
                   height: 1.4,
@@ -947,148 +799,67 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
               ),
             ],
 
-            // ==================================================
-            // CONTENT
-            // ==================================================
-
-            if (content
-                .trim()
-                .isNotEmpty &&
-                content.trim() !=
-                    description.trim()) ...[
+            if (content.trim().isNotEmpty &&
+                content.trim() != description.trim()) ...[
               const SizedBox(height: 8),
-
               Text(
                 'Isi: $content',
                 maxLines: 2,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 12,
-                  color:
-                  Colors.grey.shade600,
+                  color: Colors.grey.shade600,
                 ),
               ),
             ],
 
             const SizedBox(height: 14),
-
             const Divider(height: 1),
-
             const SizedBox(height: 14),
-
-            // ==================================================
-            // INFORMATION CHIPS
-            // ==================================================
 
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 _buildInfoChip(
-                  icon:
-                  Icons.attach_file_outlined,
+                  icon: Icons.attach_file_outlined,
                   text: type,
                 ),
-
                 if (hasAttachment)
                   _buildInfoChip(
-                    icon:
-                    Icons.attachment_outlined,
-                    text:
-                    'URL materi tersedia',
+                    icon: Icons.attachment_outlined,
+                    text: 'URL materi tersedia',
                   ),
-
                 if (hasVideo)
                   _buildInfoChip(
-                    icon:
-                    Icons.video_library_outlined,
-                    text:
-                    'Video tersedia',
+                    icon: Icons.video_library_outlined,
+                    text: 'Video tersedia',
                   ),
-
-                if (courseLessonId
-                    .isNotEmpty)
+                if (courseLessonId.isNotEmpty)
                   _buildInfoChip(
-                    icon:
-                    Icons.play_circle_outline,
-                    text:
-                    'Lesson terhubung',
+                    icon: Icons.play_circle_outline,
+                    text: 'Lesson terhubung',
                   ),
               ],
             ),
 
-            // ==================================================
-            // URL MATERI
-            // ==================================================
-
             if (hasAttachment) ...[
               const SizedBox(height: 14),
-
-              Container(
-                width: double.infinity,
-                padding:
-                const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color:
-                  Colors.grey.withValues(
-                    alpha: 0.06,
-                  ),
-                  borderRadius:
-                  BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.link,
-                      size: 18,
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    Expanded(
-                      child: Text(
-                        attachmentUrl,
-                        maxLines: 2,
-                        overflow:
-                        TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color:
-                          Colors.grey.shade700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildUrlContainer(attachmentUrl),
             ],
-
-            // ==================================================
-            // VIDEO
-            // ==================================================
 
             if (hasVideo) ...[
               const SizedBox(height: 14),
-
               Container(
                 width: double.infinity,
-                padding:
-                const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: theme
-                      .colorScheme
-                      .primary
-                      .withValues(
+                  color: theme.colorScheme.primary.withValues(
                     alpha: 0.06,
                   ),
-                  borderRadius:
-                  BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: theme
-                        .colorScheme
-                        .primary
-                        .withValues(
+                    color: theme.colorScheme.primary.withValues(
                       alpha: 0.15,
                     ),
                   ),
@@ -1096,60 +867,39 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                 child: Row(
                   children: [
                     Icon(
-                      Icons
-                          .video_library_outlined,
-                      color:
-                      theme.colorScheme.primary,
+                      Icons.video_library_outlined,
+                      color: theme.colorScheme.primary,
                     ),
-
                     const SizedBox(width: 10),
-
                     Expanded(
                       child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
                             'Video terlampir',
                             style: TextStyle(
-                              fontWeight:
-                              FontWeight.bold,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-
-                          if (videoFileName
-                              .trim()
-                              .isNotEmpty) ...[
+                          if (videoFileName.trim().isNotEmpty) ...[
                             const SizedBox(height: 3),
-
                             Text(
                               videoFileName,
                               maxLines: 1,
-                              overflow:
-                              TextOverflow
-                                  .ellipsis,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors
-                                    .grey
-                                    .shade600,
+                                color: Colors.grey.shade600,
                               ),
                             ),
                           ],
-
-                          if (videoSize is num &&
-                              videoSize > 0) ...[
+                          if (videoSize is num && videoSize > 0) ...[
                             const SizedBox(height: 2),
-
                             Text(
-                              _formatFileSize(
-                                videoSize.toInt(),
-                              ),
+                              _formatFileSize(videoSize.toInt()),
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors
-                                    .grey
-                                    .shade600,
+                                color: Colors.grey.shade600,
                               ),
                             ),
                           ],
@@ -1159,70 +909,21 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 12),
-
+              _buildUrlContainer(videoUrl),
+              const SizedBox(height: 12),
               Container(
                 width: double.infinity,
-                padding:
-                const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color:
-                  Colors.grey.withValues(
-                    alpha: 0.06,
-                  ),
-                  borderRadius:
-                  BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.link,
-                      size: 18,
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    Expanded(
-                      child: Text(
-                        videoUrl,
-                        maxLines: 2,
-                        overflow:
-                        TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color:
-                          Colors.grey.shade700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Container(
-                width: double.infinity,
-                padding:
-                const EdgeInsets.symmetric(
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color:
-                  Colors.green.withValues(
-                    alpha: 0.08,
-                  ),
-                  borderRadius:
-                  BorderRadius.circular(10),
+                  color: Colors.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Row(
-                  mainAxisAlignment:
-                  MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      Icons
-                          .check_circle_outline,
+                      Icons.check_circle_outline,
                       size: 18,
                       color: Colors.green,
                     ),
@@ -1231,8 +932,7 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                       'Video tersedia',
                       style: TextStyle(
                         color: Colors.green,
-                        fontWeight:
-                        FontWeight.w600,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -1240,21 +940,14 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
               ),
             ],
 
-            // ==================================================
-            // ACTION BUTTON
-            // ==================================================
-
             const SizedBox(height: 14),
-
             Row(
               children: [
                 Expanded(
-                  child:
-                  OutlinedButton.icon(
+                  child: OutlinedButton.icon(
                     onPressed: () {
                       _openMaterialForm(
-                        materialId:
-                        materialId,
+                        materialId: materialId,
                         data: data,
                       );
                     },
@@ -1262,45 +955,64 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
                       Icons.edit_outlined,
                       size: 18,
                     ),
-                    label:
-                    const Text('Edit'),
+                    label: const Text('Edit'),
                   ),
                 ),
-
                 const SizedBox(width: 10),
-
                 Expanded(
-                  child:
-                  OutlinedButton.icon(
-                    style:
-                    OutlinedButton.styleFrom(
-                      foregroundColor:
-                      Colors.red,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
                       side: BorderSide(
-                        color: Colors.red
-                            .withValues(
-                          alpha: 0.5,
-                        ),
+                        color: Colors.red.withValues(alpha: 0.5),
                       ),
                     ),
                     onPressed: () {
-                      _openDeleteMaterial(
-                        materialId,
-                        title,
-                      );
+                      _openDeleteMaterial(materialId, title);
                     },
                     icon: const Icon(
                       Icons.delete_outline,
                       size: 18,
                     ),
-                    label:
-                    const Text('Hapus'),
+                    label: const Text('Hapus'),
                   ),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // URL CONTAINER
+  // ============================================================
+
+  Widget _buildUrlContainer(String url) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.link, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              url,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1314,39 +1026,29 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
     required String text,
   }) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: 10,
         vertical: 7,
       ),
       decoration: BoxDecoration(
-        color:
-        Colors.grey.withValues(
-          alpha: 0.08,
-        ),
-        borderRadius:
-        BorderRadius.circular(10),
+        color: Colors.grey.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
-        mainAxisSize:
-        MainAxisSize.min,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             icon,
             size: 16,
             color: Colors.grey.shade700,
           ),
-
           const SizedBox(width: 6),
-
           Text(
             text,
             style: TextStyle(
               fontSize: 12,
-              color:
-              Colors.grey.shade700,
-              fontWeight:
-              FontWeight.w500,
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -1362,44 +1064,33 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
     switch (classId) {
       case 'X_RPL_1':
         return 'X RPL 1';
-
       case 'XI_RPL_1':
         return 'XI RPL 1';
-
       case 'XI_RPL_2':
         return 'XI RPL 2';
-
       case 'XII_RPL_1':
         return 'XII RPL 1';
-
       default:
-        return classId.isEmpty
-            ? ''
-            : classId;
+        return classId.isEmpty ? '' : classId;
     }
   }
 
   // ============================================================
-  // EMPTY
+  // EMPTY STATE
   // ============================================================
 
   Widget _buildEmpty(ThemeData theme) {
     return Center(
       child: Padding(
-        padding:
-        const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 90,
               height: 90,
               decoration: BoxDecoration(
-                color: theme
-                    .colorScheme
-                    .primary
-                    .withValues(
+                color: theme.colorScheme.primary.withValues(
                   alpha: 0.08,
                 ),
                 shape: BoxShape.circle,
@@ -1407,46 +1098,30 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
               child: Icon(
                 Icons.menu_book_outlined,
                 size: 44,
-                color:
-                theme.colorScheme.primary,
+                color: theme.colorScheme.primary,
               ),
             ),
-
             const SizedBox(height: 20),
-
             const Text(
               'Belum Ada Materi',
               style: TextStyle(
                 fontSize: 20,
-                fontWeight:
-                FontWeight.bold,
+                fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'Belum ada materi pembelajaran yang ditambahkan.',
-              textAlign:
-              TextAlign.center,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color:
-                Colors.grey.shade600,
+                color: Colors.grey.shade600,
               ),
             ),
-
             const SizedBox(height: 22),
-
             FilledButton.icon(
-              onPressed:
-                  () => _openMaterialForm(),
-              icon: const Icon(
-                Icons.add,
-              ),
-              label:
-              const Text(
-                'Tambah Materi',
-              ),
+              onPressed: () => _openMaterialForm(),
+              icon: const Icon(Icons.add),
+              label: const Text('Tambah Materi'),
             ),
           ],
         ),
@@ -1459,32 +1134,20 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
   // ============================================================
 
   String _formatFileSize(int bytes) {
-    if (bytes <= 0) {
-      return '0 B';
-    }
+    if (bytes <= 0) return '0 B';
 
-    const units = [
-      'B',
-      'KB',
-      'MB',
-      'GB',
-    ];
+    const units = ['B', 'KB', 'MB', 'GB'];
 
-    double size =
-    bytes.toDouble();
-
+    double size = bytes.toDouble();
     int unitIndex = 0;
 
-    while (size >= 1024 &&
-        unitIndex <
-            units.length - 1) {
+    while (size >= 1024 && unitIndex < units.length - 1) {
       size /= 1024;
       unitIndex++;
     }
 
-    return '${size.toStringAsFixed(
-      size >= 10 ? 0 : 1,
-    )} ${units[unitIndex]}';
+    return '${size.toStringAsFixed(size >= 10 ? 0 : 1)} '
+        '${units[unitIndex]}';
   }
 
   // ============================================================
@@ -1492,28 +1155,17 @@ class _TeacherMaterialsScreenState extends State<TeacherMaterialsScreen> {
   // ============================================================
 
   int _toInt(dynamic value) {
-    if (value is int) {
-      return value;
-    }
+    if (value is int) return value;
+    if (value is num) return value.toInt();
 
-    if (value is num) {
-      return value.toInt();
-    }
-
-    return int.tryParse(
-      value?.toString() ?? '',
-    ) ??
-        0;
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   bool _hasValidVideoSize(dynamic value) {
     return _toInt(value) > 0;
   }
 
-  bool _sameNumber(
-      dynamic first,
-      int second,
-      ) {
+  bool _sameNumber(dynamic first, int second) {
     return _toInt(first) == second;
   }
 }
@@ -1537,7 +1189,7 @@ class _ResolvedVideo {
 }
 
 // ================================================================
-// MODEL INTERNAL
+// MATERIAL MODEL
 // ================================================================
 
 class _MaterialItem {

@@ -1,5 +1,5 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class TeacherQuizScoresScreen extends StatelessWidget {
@@ -14,6 +14,26 @@ class TeacherQuizScoresScreen extends StatelessWidget {
 
   Future<List<Map<String, dynamic>>> _loadScores() async {
     final firestore = FirebaseFirestore.instance;
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      throw Exception('Silakan login terlebih dahulu.');
+    }
+
+    // Pastikan quiz memang milik guru yang sedang login.
+    final quizDoc =
+    await firestore.collection('quizzes').doc(quizId).get();
+
+    if (!quizDoc.exists) {
+      throw Exception('Quiz tidak ditemukan.');
+    }
+
+    final quizData = quizDoc.data() ?? {};
+    final teacherId = quizData['teacherId']?.toString() ?? '';
+
+    if (teacherId != user.uid) {
+      throw Exception('Anda tidak memiliki akses ke nilai quiz ini.');
+    }
 
     final usersSnapshot = await firestore.collection('users').get();
 
@@ -117,8 +137,11 @@ class TeacherQuizScoresScreen extends StatelessWidget {
 
           return RefreshIndicator(
             onRefresh: () async {
-              // FutureBuilder dibuat ulang melalui refresh halaman.
-              // Tarik ke bawah untuk memperbarui data.
+              // Halaman dapat diperbarui dengan menarik ke bawah.
+              // FutureBuilder StatelessWidget tidak otomatis mengganti
+              // future ketika refresh, sehingga data hanya dimuat ulang
+              // di sini. Untuk pembaruan tampilan, gunakan StatefulWidget
+              // jika diperlukan.
               await _loadScores();
             },
             child: ListView(
@@ -126,7 +149,6 @@ class TeacherQuizScoresScreen extends StatelessWidget {
               children: [
                 _buildHeader(context, scores.length),
                 const SizedBox(height: 16),
-
                 Row(
                   children: [
                     Expanded(
@@ -154,9 +176,7 @@ class TeacherQuizScoresScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 24),
-
                 const Text(
                   'Daftar Nilai Siswa',
                   style: TextStyle(
@@ -164,9 +184,7 @@ class TeacherQuizScoresScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 ...scores.map(
                       (item) => _StudentScoreCard(item: item),
                 ),
@@ -202,18 +220,16 @@ class TeacherQuizScoresScreen extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onPrimaryContainer,
+                    color:
+                    Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
                 ),
                 const SizedBox(height: 5),
                 Text(
                   '$total siswa sudah mengerjakan',
                   style: TextStyle(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onPrimaryContainer,
+                    color:
+                    Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
                 ),
               ],
@@ -234,9 +250,7 @@ class TeacherQuizScoresScreen extends StatelessWidget {
             Icon(
               Icons.assignment_outlined,
               size: 72,
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurfaceVariant,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             const SizedBox(height: 16),
             const Text(
@@ -334,6 +348,8 @@ class _StudentScoreCard extends StatelessWidget {
         ? _formatDate(submittedAt.toDate())
         : 'Waktu pengumpulan tidak tersedia';
 
+    final statusColor = passed ? Colors.green : Colors.red;
+
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
@@ -347,9 +363,7 @@ class _StudentScoreCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   child: Text(
-                    name.isNotEmpty
-                        ? name[0].toUpperCase()
-                        : '?',
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -370,9 +384,8 @@ class _StudentScoreCard extends StatelessWidget {
                           email,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
+                            color:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -387,14 +400,14 @@ class _StudentScoreCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: passed ? Colors.green : Colors.red,
+                        color: statusColor,
                       ),
                     ),
                     Text(
                       passed ? 'Lulus' : 'Belum lulus',
                       style: TextStyle(
                         fontSize: 12,
-                        color: passed ? Colors.green : Colors.red,
+                        color: statusColor,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -402,11 +415,9 @@ class _StudentScoreCard extends StatelessWidget {
                 ),
               ],
             ),
-
             const SizedBox(height: 14),
             const Divider(),
             const SizedBox(height: 8),
-
             Row(
               children: [
                 const Icon(
@@ -419,9 +430,7 @@ class _StudentScoreCard extends StatelessWidget {
                 ),
               ],
             ),
-
             const SizedBox(height: 8),
-
             Row(
               children: [
                 const Icon(

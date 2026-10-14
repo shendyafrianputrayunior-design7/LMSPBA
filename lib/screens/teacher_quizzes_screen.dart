@@ -1,4 +1,3 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -47,7 +46,7 @@ class _TeacherQuizzesScreenState
     final User? user = _auth.currentUser;
 
     if (user == null) {
-      _showMessage('Akun guru tidak ditemukan.');
+      _showMessage('Akun guru tidak ditemukan. Silakan login kembali.');
       return;
     }
 
@@ -94,11 +93,35 @@ class _TeacherQuizzesScreenState
 
     if (!mounted || confirm != true) return;
 
+    final User? user = _auth.currentUser;
+
+    if (user == null) {
+      _showMessage('Akun guru tidak ditemukan. Silakan login kembali.');
+      return;
+    }
+
     try {
-      await _firestore
-          .collection('quizzes')
-          .doc(quizId)
-          .delete();
+      final quizRef =
+      _firestore.collection('quizzes').doc(quizId);
+
+      final quizSnapshot = await quizRef.get();
+
+      if (!quizSnapshot.exists) {
+        if (!mounted) return;
+        _showMessage('Quiz tidak ditemukan.');
+        return;
+      }
+
+      final data = quizSnapshot.data();
+
+      // Pastikan quiz dimiliki oleh guru yang sedang login.
+      if (data?['teacherId'] != user.uid) {
+        if (!mounted) return;
+        _showMessage('Anda tidak memiliki akses untuk menghapus quiz ini.');
+        return;
+      }
+
+      await quizRef.delete();
 
       if (!mounted) return;
       _showMessage('Quiz berhasil dihapus.');
@@ -167,6 +190,19 @@ class _TeacherQuizzesScreenState
 
   @override
   Widget build(BuildContext context) {
+    final User? user = _auth.currentUser;
+
+    if (user == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('Quiz - ${widget.course.title}'),
+        ),
+        body: const Center(
+          child: Text('Silakan login untuk melihat quiz.'),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Quiz - ${widget.course.title}'),
@@ -180,6 +216,7 @@ class _TeacherQuizzesScreenState
         stream: _firestore
             .collection('quizzes')
             .where('courseId', isEqualTo: widget.course.id)
+            .where('teacherId', isEqualTo: user.uid)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -210,7 +247,8 @@ class _TeacherQuizzesScreenState
             final aCreated = a.data()['createdAt'];
             final bCreated = b.data()['createdAt'];
 
-            if (aCreated is Timestamp && bCreated is Timestamp) {
+            if (aCreated is Timestamp &&
+                bCreated is Timestamp) {
               return bCreated.compareTo(aCreated);
             }
 
@@ -311,7 +349,8 @@ class _AddQuizPage extends StatefulWidget {
 }
 
 class _AddQuizPageState extends State<_AddQuizPage> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final GlobalKey<FormState> _formKey =
+  GlobalKey<FormState>();
 
   String _title = '';
   String _description = '';
@@ -448,7 +487,8 @@ class _AddQuizPageState extends State<_AddQuizPage> {
                 ),
                 onChanged: (value) => _duration = value,
                 validator: (value) {
-                  final duration = int.tryParse(value?.trim() ?? '');
+                  final duration =
+                  int.tryParse(value?.trim() ?? '');
                   if (duration == null || duration <= 0) {
                     return 'Durasi harus lebih dari 0.';
                   }
@@ -471,7 +511,8 @@ class _AddQuizPageState extends State<_AddQuizPage> {
                 ),
                 onChanged: (value) => _passingScore = value,
                 validator: (value) {
-                  final score = int.tryParse(value?.trim() ?? '');
+                  final score =
+                  int.tryParse(value?.trim() ?? '');
                   if (score == null || score < 0 || score > 100) {
                     return 'Nilai harus antara 0–100.';
                   }
@@ -583,7 +624,8 @@ class _DeleteQuizPage extends StatelessWidget {
                     backgroundColor: Colors.red,
                     foregroundColor: Colors.white,
                   ),
-                  onPressed: () => Navigator.of(context).pop(true),
+                  onPressed: () =>
+                      Navigator.of(context).pop(true),
                   icon: const Icon(Icons.delete_outline),
                   label: const Text('Hapus Quiz'),
                 ),
@@ -593,7 +635,8 @@ class _DeleteQuizPage extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(false),
+                  onPressed: () =>
+                      Navigator.of(context).pop(false),
                   child: const Text('Batal'),
                 ),
               ),
@@ -627,7 +670,8 @@ class _QuizCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = (data['title'] ?? 'Quiz').toString();
-    final description = (data['description'] ?? '').toString();
+    final description =
+    (data['description'] ?? '').toString();
 
     final duration = data['duration'] is int
         ? data['duration'] as int

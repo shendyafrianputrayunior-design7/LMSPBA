@@ -1,3 +1,4 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -13,6 +14,7 @@ import '../firebase_options.dart';
 /// - Password tidak disimpan di Firestore.
 /// - Profil utama disimpan di users/{uid}.
 /// - Profil siswa tidak menggunakan koleksi students.
+/// - ID guru dibuat berurutan: teacher_001, teacher_002, dst.
 class AccountCreationService {
   AccountCreationService._();
 
@@ -83,19 +85,51 @@ class AccountCreationService {
       );
     }
 
-    // Dokumen lama yang belum memiliki active tetap dianggap aktif.
+    // Dokumen lama tanpa active tetap dianggap aktif.
     if (data['active'] == false) {
-      throw Exception(
-        'Akun Admin sedang dinonaktifkan.',
-      );
+      throw Exception('Akun Admin sedang dinonaktifkan.');
     }
+  }
+
+  /// Membuat ID guru berurutan menggunakan transaksi Firestore.
+  ///
+  /// Dokumen penghitung:
+  /// counters/teachers
+  ///
+  /// Contoh:
+  /// teacher_001
+  /// teacher_002
+  /// teacher_003
+  Future<String> _generateTeacherId(
+      Transaction transaction,
+      ) async {
+    final counterRef = _db
+        .collection('counters')
+        .doc('teachers');
+
+    final counterSnapshot = await transaction.get(counterRef);
+
+    int lastNumber = 0;
+
+    if (counterSnapshot.exists) {
+      final data = counterSnapshot.data();
+
+      lastNumber =
+          (data?['lastNumber'] as num?)?.toInt() ?? 0;
+    }
+
+    final nextNumber = lastNumber + 1;
+
+    return 'teacher_${nextNumber.toString().padLeft(3, '0')}';
   }
 
   /// Membuat akun Guru.
   ///
-  /// Profil guru disimpan pada:
+  /// Profil disimpan di:
   /// - users/{uid}
-  /// - teachers/{teacherDocId}
+  /// - teachers/teacher_XXX
+  ///
+  /// Mengembalikan ID guru, misalnya teacher_001.
   Future<String> createTeacherAccount({
     required String name,
     required String subject,
@@ -122,6 +156,9 @@ class AccountCreationService {
     final auth = await _getSecondaryAuth();
     UserCredential? credential;
 
+    String? createdTeacherId;
+    bool profileCreationStarted = false;
+
     try {
       credential = await auth.createUserWithEmailAndPassword(
         email: email.trim(),
@@ -136,39 +173,92 @@ class AccountCreationService {
 
       final uid = newUser.uid;
 
-      final teacherRef = _db.collection('teachers').doc();
       final userRef = _db.collection('users').doc(uid);
 
-      final batch = _db.batch();
+      // Transaksi membuat ID berikutnya dan profil guru.
+      // Transaksi membuat ID berikutnya dan profil guru.
+      final teacherId = await _db.runTransaction<String>(
+            (transaction) async {
+          final counterRef = _db
+              .collection('counters')
+              .doc('teachers');
 
-      batch.set(userRef, {
+          // Baca counter terlebih dahulu.
+          final counterSnapshot = await transaction.get(counterRef);
+
+          int lastNumber = 0;
+
+          if (counterSnapshot.exists) {
+            final counterData = counterSnapshot.data();
+
+            lastNumber =
+                (counterData?['lastNumber'] as num?)?.toInt() ?? 0;
+          }
+
+          final nextNumber = lastNumber + 1;
+          final generatedId =
+              'teacher_${nextNumber.toString().padLeft(3, '0')}';
+
+          final teacherRef = _db
+              .collection('teachers')
+              .doc(generatedId);
+
+          // Semua operasi baca dilakukan sebelum operasi tulis.
+          final existingTeacher = await transaction.get(teacherRef);
+
+          if (existingTeacher.exists) {
+            throw Exception(
+              'ID $generatedId sudah digunakan. '
+                  'Periksa counters/teachers.lastNumber.',
+            );
+          }
+
+          // Mulai operasi tulis setelah seluruh pembacaan selesai.
+          transaction.set(counterRef, {
+            'lastNumber': nextNumber,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          transaction.set(teacherRef, {
+            'uid': uid,
+            'teacherId': generatedId,
+            'name': name.trim(),
+            'subject': subject.trim(),
+            'email': email.trim(),
+            'nip': nip.trim(),
+            'active': true,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          return generatedId;
+        },
+      );
+
+      createdTeacherId = teacherId;
+
+// Simpan profil utama akun guru.
+      profileCreationStarted = true;
+
+      await userRef.set({
         'uid': uid,
         'name': name.trim(),
         'username': name.trim(),
         'email': email.trim(),
         'role': 'teacher',
-        'teacherDocId': teacherRef.id,
+        'teacherId': teacherId,
+        'teacherDocId': teacherId,
         'active': true,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      batch.set(teacherRef, {
-        'uid': uid,
-        'name': name.trim(),
-        'subject': subject.trim(),
-        'email': email.trim(),
-        'nip': nip.trim(),
-        'active': true,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      await batch.commit();
-
-      return uid;
+      return teacherId;
     } catch (e) {
-      // Berusaha membersihkan akun Auth jika pembuatan profil gagal.
+      // Berusaha membersihkan profil jika pembuatan akun gagal.
+      // Penghapusan profil guru tidak dilakukan secara otomatis
+      // jika penulisan users gagal, agar tidak menghapus data
+      // secara keliru ketika terjadi kegagalan jaringan.
       if (credential?.user != null) {
         try {
           await credential!.user!.delete();
@@ -178,6 +268,13 @@ class AccountCreationService {
           );
         }
       }
+
+      debugPrint(
+        'Pembuatan akun Guru gagal. '
+            'teacherId=$createdTeacherId, '
+            'profileCreationStarted=$profileCreationStarted, '
+            'error=$e',
+      );
 
       rethrow;
     } finally {
@@ -193,7 +290,7 @@ class AccountCreationService {
 
   /// Membuat akun Siswa.
   ///
-  /// Profil siswa hanya disimpan pada users/{uid}.
+  /// Profil siswa hanya disimpan di users/{uid}.
   /// Tidak membuat koleksi students.
   Future<String> createStudentAccount({
     required String name,
@@ -251,7 +348,6 @@ class AccountCreationService {
 
       return uid;
     } catch (e) {
-      // Berusaha membersihkan akun Auth jika pembuatan profil gagal.
       if (credential?.user != null) {
         try {
           await credential!.user!.delete();

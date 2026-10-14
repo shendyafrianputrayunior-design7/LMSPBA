@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class TeacherExamQuestionsScreen extends StatefulWidget {
@@ -20,10 +21,26 @@ class _TeacherExamQuestionsScreenState
     extends State<TeacherExamQuestionsScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  static const String _teacherId = 'teacher_001';
+  String? get _teacherId => FirebaseAuth.instance.currentUser?.uid;
 
   @override
   Widget build(BuildContext context) {
+    final teacherId = _teacherId;
+
+    if (teacherId == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Soal Ujian'),
+        ),
+        body: const Center(
+          child: Text(
+            'Silakan login terlebih dahulu.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Soal Ujian'),
@@ -31,10 +48,8 @@ class _TeacherExamQuestionsScreenState
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: _firestore
             .collection('exam_questions')
-            .where(
-          'examId',
-          isEqualTo: widget.examId,
-        )
+            .where('examId', isEqualTo: widget.examId)
+            .where('teacherId', isEqualTo: teacherId)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -48,8 +63,7 @@ class _TeacherExamQuestionsScreenState
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  'Gagal mengambil soal ujian.\n\n'
-                      '${snapshot.error}',
+                  'Gagal mengambil soal ujian.\n\n${snapshot.error}',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -62,7 +76,6 @@ class _TeacherExamQuestionsScreenState
           sortedDocs.sort((a, b) {
             final orderA = _parseInt(a.data()['order']);
             final orderB = _parseInt(b.data()['order']);
-
             return orderA.compareTo(orderB);
           });
 
@@ -77,15 +90,9 @@ class _TeacherExamQuestionsScreenState
               );
             },
             child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(
-                20,
-                20,
-                20,
-                100,
-              ),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
               itemCount: sortedDocs.length,
-              separatorBuilder: (_, __) =>
-              const SizedBox(height: 12),
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final doc = sortedDocs[index];
                 final data = doc.data();
@@ -117,9 +124,7 @@ class _TeacherExamQuestionsScreenState
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          _showQuestionForm();
-        },
+        onPressed: teacherId == null ? null : _showQuestionForm,
         icon: const Icon(Icons.add),
         label: const Text('Tambah Soal'),
       ),
@@ -153,8 +158,7 @@ class _TeacherExamQuestionsScreenState
             ),
             const SizedBox(height: 8),
             Text(
-              'Tambahkan soal untuk ujian '
-                  '"${widget.examTitle}".',
+              'Tambahkan soal untuk ujian "${widget.examTitle}".',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -162,9 +166,7 @@ class _TeacherExamQuestionsScreenState
             ),
             const SizedBox(height: 22),
             FilledButton.icon(
-              onPressed: () {
-                _showQuestionForm();
-              },
+              onPressed: _showQuestionForm,
               icon: const Icon(Icons.add),
               label: const Text('Tambah Soal'),
             ),
@@ -182,6 +184,22 @@ class _TeacherExamQuestionsScreenState
     String? questionId,
     Map<String, dynamic>? questionData,
   }) async {
+    final teacherId = _teacherId;
+
+    if (teacherId == null) {
+      _showMessage('Silakan login terlebih dahulu.');
+      return;
+    }
+
+    if (!await _verifyExamOwnership(teacherId)) {
+      if (mounted) {
+        _showMessage('Ujian tidak ditemukan atau bukan milik Anda.');
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -190,7 +208,7 @@ class _TeacherExamQuestionsScreenState
           questionId: questionId,
           questionData: questionData,
           examId: widget.examId,
-          teacherId: _teacherId,
+          teacherId: teacherId,
           firestore: _firestore,
           getNextOrder: _getNextOrder,
         );
@@ -200,15 +218,34 @@ class _TeacherExamQuestionsScreenState
     if (!mounted) return;
 
     if (result == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            questionId == null
-                ? 'Soal berhasil ditambahkan.'
-                : 'Soal berhasil diperbarui.',
-          ),
-        ),
+      _showMessage(
+        questionId == null
+            ? 'Soal berhasil ditambahkan.'
+            : 'Soal berhasil diperbarui.',
       );
+    }
+  }
+
+  // ============================================================
+  // VERIFY EXAM OWNERSHIP
+  // ============================================================
+
+  Future<bool> _verifyExamOwnership(String teacherId) async {
+    try {
+      final exam = await _firestore
+          .collection('exams')
+          .doc(widget.examId)
+          .get();
+
+      if (!exam.exists) return false;
+
+      final data = exam.data();
+      if (data == null) return false;
+
+      return data['teacherId']?.toString() == teacherId;
+    } catch (e) {
+      debugPrint('Gagal memeriksa kepemilikan ujian: $e');
+      return false;
     }
   }
 
@@ -223,10 +260,7 @@ class _TeacherExamQuestionsScreenState
 
     for (final doc in docs) {
       final order = _parseInt(doc.data()['order']);
-
-      if (order > maxOrder) {
-        maxOrder = order;
-      }
+      if (order > maxOrder) maxOrder = order;
     }
 
     return maxOrder + 1;
@@ -240,6 +274,13 @@ class _TeacherExamQuestionsScreenState
       String questionId,
       String question,
       ) async {
+    final teacherId = _teacherId;
+
+    if (teacherId == null) {
+      _showMessage('Silakan login terlebih dahulu.');
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
@@ -252,15 +293,11 @@ class _TeacherExamQuestionsScreenState
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false);
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('Batal'),
             ),
             FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true);
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('Hapus'),
             ),
           ],
@@ -268,33 +305,40 @@ class _TeacherExamQuestionsScreenState
       },
     );
 
-    if (confirmed != true) {
-      return;
-    }
+    if (confirmed != true) return;
 
     try {
-      await _firestore
-          .collection('exam_questions')
-          .doc(questionId)
-          .delete();
+      final questionRef =
+      _firestore.collection('exam_questions').doc(questionId);
+
+      final questionSnapshot = await questionRef.get();
+
+      if (!questionSnapshot.exists) {
+        _showMessage('Soal sudah tidak tersedia.');
+        return;
+      }
+
+      final questionData = questionSnapshot.data();
+
+      if (questionData == null ||
+          questionData['examId']?.toString() != widget.examId ||
+          questionData['teacherId']?.toString() != teacherId) {
+        _showMessage('Anda tidak memiliki akses untuk menghapus soal ini.');
+        return;
+      }
+
+      if (!await _verifyExamOwnership(teacherId)) {
+        _showMessage('Anda tidak memiliki akses ke ujian ini.');
+        return;
+      }
+
+      await questionRef.delete();
 
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Soal berhasil dihapus.'),
-        ),
-      );
+      _showMessage('Soal berhasil dihapus.');
     } catch (e) {
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal menghapus soal:\n$e',
-          ),
-        ),
-      );
+      _showMessage('Gagal menghapus soal:\n$e');
     }
   }
 
@@ -302,9 +346,7 @@ class _TeacherExamQuestionsScreenState
   // READ OPTIONS
   // ============================================================
 
-  Map<String, String> _readOptions(
-      Map<String, dynamic> data,
-      ) {
+  Map<String, String> _readOptions(Map<String, dynamic> data) {
     final raw = data['options'];
 
     if (raw is Map) {
@@ -329,18 +371,22 @@ class _TeacherExamQuestionsScreenState
   // ============================================================
 
   int _parseInt(dynamic value) {
-    if (value is int) {
-      return value;
-    }
+    if (value is int) return value;
+    if (value is double) return value.toInt();
 
-    if (value is double) {
-      return value.toInt();
-    }
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
 
-    return int.tryParse(
-      value?.toString() ?? '',
-    ) ??
-        0;
+  // ============================================================
+  // MESSAGE
+  // ============================================================
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 }
 
@@ -356,7 +402,7 @@ class _QuestionFormDialog extends StatefulWidget {
   final FirebaseFirestore firestore;
 
   final int Function(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>>,
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
       ) getNextOrder;
 
   const _QuestionFormDialog({
@@ -373,8 +419,7 @@ class _QuestionFormDialog extends StatefulWidget {
       _QuestionFormDialogState();
 }
 
-class _QuestionFormDialogState
-    extends State<_QuestionFormDialog> {
+class _QuestionFormDialogState extends State<_QuestionFormDialog> {
   late final TextEditingController _questionController;
   late final TextEditingController _optionAController;
   late final TextEditingController _optionBController;
@@ -382,11 +427,9 @@ class _QuestionFormDialogState
   late final TextEditingController _optionDController;
   late final TextEditingController _pointsController;
 
-  final GlobalKey<FormState> _formKey =
-  GlobalKey<FormState>();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   late String _correctAnswer;
-
   bool _saving = false;
 
   bool get _isEdit => widget.questionId != null;
@@ -396,47 +439,24 @@ class _QuestionFormDialogState
     super.initState();
 
     _questionController = TextEditingController(
-      text: (widget.questionData?['question'] ?? '')
-          .toString(),
+      text: (widget.questionData?['question'] ?? '').toString(),
     );
 
-    _optionAController = TextEditingController(
-      text: _getOption('A'),
-    );
+    _optionAController = TextEditingController(text: _getOption('A'));
+    _optionBController = TextEditingController(text: _getOption('B'));
+    _optionCController = TextEditingController(text: _getOption('C'));
+    _optionDController = TextEditingController(text: _getOption('D'));
 
-    _optionBController = TextEditingController(
-      text: _getOption('B'),
-    );
-
-    _optionCController = TextEditingController(
-      text: _getOption('C'),
-    );
-
-    _optionDController = TextEditingController(
-      text: _getOption('D'),
-    );
-
-    final existingPoints =
-    _parseInt(widget.questionData?['points']);
+    final existingPoints = _parseInt(widget.questionData?['points']);
 
     _pointsController = TextEditingController(
-      text: existingPoints > 0
-          ? existingPoints.toString()
-          : '',
+      text: existingPoints > 0 ? existingPoints.toString() : '',
     );
 
     final answer =
-    (widget.questionData?['correctAnswer'] ?? 'A')
-        .toString();
+    (widget.questionData?['correctAnswer'] ?? 'A').toString();
 
-    _correctAnswer = [
-      'A',
-      'B',
-      'C',
-      'D',
-    ].contains(answer)
-        ? answer
-        : 'A';
+    _correctAnswer = ['A', 'B', 'C', 'D'].contains(answer) ? answer : 'A';
   }
 
   @override
@@ -447,7 +467,6 @@ class _QuestionFormDialogState
     _optionCController.dispose();
     _optionDController.dispose();
     _pointsController.dispose();
-
     super.dispose();
   }
 
@@ -458,9 +477,7 @@ class _QuestionFormDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(
-        _isEdit ? 'Edit Soal' : 'Tambah Soal',
-      ),
+      title: Text(_isEdit ? 'Edit Soal' : 'Tambah Soal'),
       content: SizedBox(
         width: 600,
         child: SingleChildScrollView(
@@ -469,229 +486,79 @@ class _QuestionFormDialogState
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ==================================================
-                // PERTANYAAN
-                // ==================================================
-
                 TextFormField(
                   controller: _questionController,
                   maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: 'Pertanyaan',
-                    hintText:
-                    'Masukkan pertanyaan ujian',
+                    hintText: 'Masukkan pertanyaan ujian',
                     alignLabelWithHint: true,
                     prefixIcon: Padding(
-                      padding: EdgeInsets.only(
-                        top: 12,
-                      ),
-                      child: Icon(
-                        Icons.help_outline,
-                      ),
+                      padding: EdgeInsets.only(top: 12),
+                      child: Icon(Icons.help_outline),
                     ),
                   ),
                   validator: (value) {
-                    if (value == null ||
-                        value.trim().isEmpty) {
+                    if (value == null || value.trim().isEmpty) {
                       return 'Pertanyaan wajib diisi';
                     }
-
                     return null;
                   },
                 ),
-
                 const SizedBox(height: 16),
-
-                // ==================================================
-                // OPSI A
-                // ==================================================
-
-                TextFormField(
+                _buildOptionField(
                   controller: _optionAController,
-                  decoration: const InputDecoration(
-                    labelText: 'Opsi A',
-                    prefixIcon: CircleAvatar(
-                      radius: 12,
-                      child: Text(
-                        'A',
-                        style: TextStyle(
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null ||
-                        value.trim().isEmpty) {
-                      return 'Opsi A wajib diisi';
-                    }
-
-                    return null;
-                  },
+                  label: 'A',
                 ),
-
                 const SizedBox(height: 12),
-
-                // ==================================================
-                // OPSI B
-                // ==================================================
-
-                TextFormField(
+                _buildOptionField(
                   controller: _optionBController,
-                  decoration: const InputDecoration(
-                    labelText: 'Opsi B',
-                    prefixIcon: CircleAvatar(
-                      radius: 12,
-                      child: Text(
-                        'B',
-                        style: TextStyle(
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null ||
-                        value.trim().isEmpty) {
-                      return 'Opsi B wajib diisi';
-                    }
-
-                    return null;
-                  },
+                  label: 'B',
                 ),
-
                 const SizedBox(height: 12),
-
-                // ==================================================
-                // OPSI C
-                // ==================================================
-
-                TextFormField(
+                _buildOptionField(
                   controller: _optionCController,
-                  decoration: const InputDecoration(
-                    labelText: 'Opsi C',
-                    prefixIcon: CircleAvatar(
-                      radius: 12,
-                      child: Text(
-                        'C',
-                        style: TextStyle(
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null ||
-                        value.trim().isEmpty) {
-                      return 'Opsi C wajib diisi';
-                    }
-
-                    return null;
-                  },
+                  label: 'C',
                 ),
-
                 const SizedBox(height: 12),
-
-                // ==================================================
-                // OPSI D
-                // ==================================================
-
-                TextFormField(
+                _buildOptionField(
                   controller: _optionDController,
-                  decoration: const InputDecoration(
-                    labelText: 'Opsi D',
-                    prefixIcon: CircleAvatar(
-                      radius: 12,
-                      child: Text(
-                        'D',
-                        style: TextStyle(
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null ||
-                        value.trim().isEmpty) {
-                      return 'Opsi D wajib diisi';
-                    }
-
-                    return null;
-                  },
+                  label: 'D',
                 ),
-
                 const SizedBox(height: 18),
-
-                // ==================================================
-                // JAWABAN BENAR
-                // ==================================================
-
                 DropdownButtonFormField<String>(
                   initialValue: _correctAnswer,
                   decoration: const InputDecoration(
                     labelText: 'Jawaban Benar',
-                    prefixIcon: Icon(
-                      Icons.check_circle_outline,
-                    ),
+                    prefixIcon: Icon(Icons.check_circle_outline),
                   ),
                   items: const [
-                    DropdownMenuItem(
-                      value: 'A',
-                      child: Text('Opsi A'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'B',
-                      child: Text('Opsi B'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'C',
-                      child: Text('Opsi C'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'D',
-                      child: Text('Opsi D'),
-                    ),
+                    DropdownMenuItem(value: 'A', child: Text('Opsi A')),
+                    DropdownMenuItem(value: 'B', child: Text('Opsi B')),
+                    DropdownMenuItem(value: 'C', child: Text('Opsi C')),
+                    DropdownMenuItem(value: 'D', child: Text('Opsi D')),
                   ],
                   onChanged: _saving
                       ? null
                       : (value) {
-                    if (value == null) {
-                      return;
-                    }
-
-                    setState(() {
-                      _correctAnswer = value;
-                    });
+                    if (value == null) return;
+                    setState(() => _correctAnswer = value);
                   },
                 ),
-
                 const SizedBox(height: 16),
-
-                // ==================================================
-                // POINT
-                // ==================================================
-
                 TextFormField(
                   controller: _pointsController,
-                  keyboardType:
-                  TextInputType.number,
+                  keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
                     labelText: 'Poin Soal',
                     hintText: 'Contoh: 10',
-                    prefixIcon: Icon(
-                      Icons.stars_outlined,
-                    ),
+                    prefixIcon: Icon(Icons.stars_outlined),
                   ),
                   validator: (value) {
-                    final points = int.tryParse(
-                      value?.trim() ?? '',
-                    );
-
-                    if (points == null ||
-                        points <= 0) {
+                    final points = int.tryParse(value?.trim() ?? '');
+                    if (points == null || points <= 0) {
                       return 'Poin harus lebih dari 0';
                     }
-
                     return null;
                   },
                 ),
@@ -701,38 +568,53 @@ class _QuestionFormDialogState
         ),
       ),
       actions: [
-        // ==================================================
-        // BATAL
-        // ==================================================
-
         TextButton(
-          onPressed: _saving
-              ? null
-              : () {
-            Navigator.of(context).pop(false);
-          },
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
           child: const Text('Batal'),
         ),
-
-        // ==================================================
-        // SIMPAN
-        // ==================================================
-
         FilledButton(
           onPressed: _saving ? null : _saveQuestion,
           child: _saving
               ? const SizedBox(
             width: 20,
             height: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-            ),
+            child: CircularProgressIndicator(strokeWidth: 2),
           )
-              : Text(
-            _isEdit ? 'Simpan' : 'Tambah',
-          ),
+              : Text(_isEdit ? 'Simpan' : 'Tambah'),
         ),
       ],
+    );
+  }
+
+  // ============================================================
+  // OPTION FIELD
+  // ============================================================
+
+  Widget _buildOptionField({
+    required TextEditingController controller,
+    required String label,
+  }) {
+    return TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: 'Opsi $label',
+        prefixIcon: Padding(
+          padding: const EdgeInsets.all(8),
+          child: CircleAvatar(
+            radius: 12,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+        ),
+      ),
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) {
+          return 'Opsi $label wajib diisi';
+        }
+        return null;
+      },
     );
   }
 
@@ -741,67 +623,70 @@ class _QuestionFormDialogState
   // ============================================================
 
   Future<void> _saveQuestion() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
-    final points = int.tryParse(
-      _pointsController.text.trim(),
-    );
+    final points = int.tryParse(_pointsController.text.trim());
+    if (points == null || points <= 0) return;
 
-    if (points == null || points <= 0) {
-      return;
-    }
-
-    setState(() {
-      _saving = true;
-    });
+    setState(() => _saving = true);
 
     try {
-      // ==========================================================
-      // AMBIL SOAL YANG SUDAH ADA
-      // ==========================================================
-
-      final existingSnapshot =
-      await widget.firestore
-          .collection('exam_questions')
-          .where(
-        'examId',
-        isEqualTo: widget.examId,
-      )
+      final examSnapshot = await widget.firestore
+          .collection('exams')
+          .doc(widget.examId)
           .get();
 
-      // ==========================================================
-      // TENTUKAN ORDER
-      // ==========================================================
+      if (!examSnapshot.exists) {
+        throw Exception('Dokumen ujian tidak ditemukan.');
+      }
+
+      final examData = examSnapshot.data();
+
+      if (examData == null ||
+          examData['teacherId']?.toString() != widget.teacherId) {
+        throw Exception('Anda tidak memiliki akses ke ujian ini.');
+      }
+
+      final questionCollection =
+      widget.firestore.collection('exam_questions');
+
+      final existingSnapshot = await questionCollection
+          .where('examId', isEqualTo: widget.examId)
+          .where('teacherId', isEqualTo: widget.teacherId)
+          .get();
 
       int order;
 
       if (_isEdit) {
-        order = _parseInt(
-          widget.questionData?['order'],
-        );
+        final existingQuestion = await questionCollection
+            .doc(widget.questionId)
+            .get();
+
+        if (!existingQuestion.exists) {
+          throw Exception('Soal yang akan diedit tidak ditemukan.');
+        }
+
+        final existingData = existingQuestion.data();
+
+        if (existingData == null ||
+            existingData['examId']?.toString() != widget.examId ||
+            existingData['teacherId']?.toString() != widget.teacherId) {
+          throw Exception('Anda tidak memiliki akses ke soal ini.');
+        }
+
+        order = _parseInt(widget.questionData?['order']);
 
         if (order <= 0) {
-          order = widget.getNextOrder(
-            existingSnapshot.docs,
-          );
+          order = widget.getNextOrder(existingSnapshot.docs);
         }
       } else {
-        order = widget.getNextOrder(
-          existingSnapshot.docs,
-        );
+        order = widget.getNextOrder(existingSnapshot.docs);
       }
-
-      // ==========================================================
-      // DATA
-      // ==========================================================
 
       final data = <String, dynamic>{
         'teacherId': widget.teacherId,
         'examId': widget.examId,
-        'question':
-        _questionController.text.trim(),
+        'question': _questionController.text.trim(),
         'options': {
           'A': _optionAController.text.trim(),
           'B': _optionBController.text.trim(),
@@ -811,73 +696,30 @@ class _QuestionFormDialogState
         'correctAnswer': _correctAnswer,
         'points': points,
         'order': order,
-        'updatedAt':
-        FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // ==========================================================
-      // ADD
-      // ==========================================================
-
       if (!_isEdit) {
-        data['createdAt'] =
-            FieldValue.serverTimestamp();
+        data['createdAt'] = FieldValue.serverTimestamp();
 
-        await widget.firestore
-            .collection('exam_questions')
-            .add(data);
+        await questionCollection.add(data);
+      } else {
+        await questionCollection.doc(widget.questionId).update(data);
       }
 
-      // ==========================================================
-      // UPDATE
-      // ==========================================================
-
-      else {
-        await widget.firestore
-            .collection('exam_questions')
-            .doc(widget.questionId)
-            .update(data);
-      }
-
-      // ==========================================================
-      // TUTUP DIALOG
-      // ==========================================================
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e, stackTrace) {
-      debugPrint(
-        '========================================',
-      );
-      debugPrint(
-        'ERROR SIMPAN SOAL',
-      );
-      debugPrint(
-        '$e',
-      );
-      debugPrint(
-        '$stackTrace',
-      );
-      debugPrint(
-        '========================================',
-      );
+      debugPrint('ERROR SIMPAN SOAL: $e');
+      debugPrint('$stackTrace');
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
-      setState(() {
-        _saving = false;
-      });
+      setState(() => _saving = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Gagal menyimpan soal:\n$e',
-          ),
+          content: Text('Gagal menyimpan soal:\n$e'),
           duration: const Duration(seconds: 5),
         ),
       );
@@ -890,10 +732,7 @@ class _QuestionFormDialogState
 
   String _getOption(String option) {
     final data = widget.questionData;
-
-    if (data == null) {
-      return '';
-    }
+    if (data == null) return '';
 
     final raw = data['options'];
 
@@ -909,18 +748,10 @@ class _QuestionFormDialogState
   // ============================================================
 
   int _parseInt(dynamic value) {
-    if (value is int) {
-      return value;
-    }
+    if (value is int) return value;
+    if (value is double) return value.toInt();
 
-    if (value is double) {
-      return value.toInt();
-    }
-
-    return int.tryParse(
-      value?.toString() ?? '',
-    ) ??
-        0;
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 }
 
@@ -935,7 +766,6 @@ class _QuestionCard extends StatelessWidget {
   final Map<String, String> options;
   final String correctAnswer;
   final int points;
-
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -959,54 +789,36 @@ class _QuestionCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ==================================================
-            // HEADER
-            // ==================================================
-
             Row(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: theme.colorScheme
-                        .primaryContainer,
-                    borderRadius:
-                    BorderRadius.circular(12),
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   alignment: Alignment.center,
                   child: Text(
                     '$number',
-                    style: theme.textTheme
-                        .titleMedium
-                        ?.copyWith(
+                    style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: theme.colorScheme
-                          .onPrimaryContainer,
+                      color: theme.colorScheme.onPrimaryContainer,
                     ),
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Text(
-                    question.isEmpty
-                        ? 'Pertanyaan kosong'
-                        : question,
-                    style: theme.textTheme
-                        .titleMedium
-                        ?.copyWith(
+                    question.isEmpty ? 'Pertanyaan kosong' : question,
+                    style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-
                 PopupMenuButton<String>(
                   tooltip: 'Menu Soal',
                   onSelected: (value) {
@@ -1016,15 +828,12 @@ class _QuestionCard extends StatelessWidget {
                       onDelete();
                     }
                   },
-                  itemBuilder: (context) =>
-                  const [
+                  itemBuilder: (context) => const [
                     PopupMenuItem(
                       value: 'edit',
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.edit_outlined,
-                          ),
+                          Icon(Icons.edit_outlined),
                           SizedBox(width: 10),
                           Text('Edit'),
                         ],
@@ -1034,9 +843,7 @@ class _QuestionCard extends StatelessWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.delete_outline,
-                          ),
+                          Icon(Icons.delete_outline),
                           SizedBox(width: 10),
                           Text('Hapus'),
                         ],
@@ -1046,62 +853,41 @@ class _QuestionCard extends StatelessWidget {
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
-
-            // ==================================================
-            // OPTIONS
-            // ==================================================
-
             _OptionRow(
               label: 'A',
               text: options['A'] ?? '',
               isCorrect: correctAnswer == 'A',
             ),
-
             const SizedBox(height: 8),
-
             _OptionRow(
               label: 'B',
               text: options['B'] ?? '',
               isCorrect: correctAnswer == 'B',
             ),
-
             const SizedBox(height: 8),
-
             _OptionRow(
               label: 'C',
               text: options['C'] ?? '',
               isCorrect: correctAnswer == 'C',
             ),
-
             const SizedBox(height: 8),
-
             _OptionRow(
               label: 'D',
               text: options['D'] ?? '',
               isCorrect: correctAnswer == 'D',
             ),
-
             const SizedBox(height: 14),
-
-            // ==================================================
-            // FOOTER
-            // ==================================================
-
             Row(
               children: [
                 Container(
-                  padding:
-                  const EdgeInsets.symmetric(
+                  padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme
-                        .surfaceContainerHighest,
-                    borderRadius:
-                    BorderRadius.circular(10),
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1109,43 +895,32 @@ class _QuestionCard extends StatelessWidget {
                       Icon(
                         Icons.stars_outlined,
                         size: 16,
-                        color: theme.colorScheme
-                            .onSurfaceVariant,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                       const SizedBox(width: 5),
                       Text(
                         '$points poin',
-                        style:
-                        theme.textTheme.bodySmall,
+                        style: theme.textTheme.bodySmall,
                       ),
                     ],
                   ),
                 ),
-
                 const SizedBox(width: 8),
-
                 if (correctAnswer.isNotEmpty)
                   Container(
-                    padding:
-                    const EdgeInsets.symmetric(
+                    padding: const EdgeInsets.symmetric(
                       horizontal: 10,
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme
-                          .primaryContainer,
-                      borderRadius:
-                      BorderRadius.circular(10),
+                      color: theme.colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       'Jawaban: $correctAnswer',
-                      style: theme.textTheme
-                          .bodySmall
-                          ?.copyWith(
-                        color: theme.colorScheme
-                            .onPrimaryContainer,
-                        fontWeight:
-                        FontWeight.w600,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -1195,14 +970,11 @@ class _OptionRow extends StatelessWidget {
         color: backgroundColor,
         borderRadius: BorderRadius.circular(12),
         border: isCorrect
-            ? Border.all(
-          color: theme.colorScheme.primary,
-        )
+            ? Border.all(color: theme.colorScheme.primary)
             : null,
       ),
       child: Row(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 30,
@@ -1216,8 +988,7 @@ class _OptionRow extends StatelessWidget {
             alignment: Alignment.center,
             child: Text(
               label,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(
+              style: theme.textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: isCorrect
                     ? theme.colorScheme.onPrimary
@@ -1225,32 +996,23 @@ class _OptionRow extends StatelessWidget {
               ),
             ),
           ),
-
           const SizedBox(width: 10),
-
           Expanded(
             child: Padding(
-              padding:
-              const EdgeInsets.only(top: 5),
+              padding: const EdgeInsets.only(top: 5),
               child: Text(
-                text.isEmpty
-                    ? 'Belum diisi'
-                    : text,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(
-                  fontWeight: isCorrect
-                      ? FontWeight.w600
-                      : FontWeight.normal,
+                text.isEmpty ? 'Belum diisi' : text,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight:
+                  isCorrect ? FontWeight.w600 : FontWeight.normal,
                   color: foregroundColor,
                 ),
               ),
             ),
           ),
-
           if (isCorrect)
             Padding(
-              padding:
-              const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: 4),
               child: Icon(
                 Icons.check_circle,
                 size: 19,

@@ -1,3 +1,4 @@
+
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,7 +29,6 @@ class _TeacherAssignmentFormScreenState
     extends State<TeacherAssignmentFormScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
   final _formKey = GlobalKey<FormState>();
 
   late final TextEditingController _titleController;
@@ -48,21 +48,16 @@ class _TeacherAssignmentFormScreenState
 
   String? _selectedCourseId;
   String? _selectedCourseTitle;
-
   String? _selectedClassId;
   String? _selectedClassName;
 
-  // ============================================================
-  // FILE TUGAS
-  // ============================================================
+  String? _teacherDocumentId;
 
   File? _selectedFile;
-
   String _selectedFileName = '';
   int _selectedFileSize = 0;
   String _selectedFileType = '';
 
-  // File lama ketika edit
   String _existingFileUrl = '';
   String _existingFileName = '';
   int _existingFileSize = 0;
@@ -87,7 +82,7 @@ class _TeacherAssignmentFormScreenState
     );
 
     _pointsController = TextEditingController(
-      text: (data?['points'] ?? data?['maxScore'] ?? '100').toString(),
+      text: (data?['points'] ?? data?['maxScore'] ?? 100).toString(),
     );
 
     final existingDueDate = data?['dueDate'];
@@ -98,39 +93,23 @@ class _TeacherAssignmentFormScreenState
       _dueDate = existingDueDate;
     }
 
-    final existingCourseId =
-    (data?['courseId'] ?? '').toString().trim();
+    _selectedCourseId =
+    (data?['courseId'] ?? '').toString().trim().isEmpty
+        ? null
+        : data!['courseId'].toString().trim();
 
-    if (existingCourseId.isNotEmpty) {
-      _selectedCourseId = existingCourseId;
-    }
+    _selectedCourseTitle =
+        (data?['courseTitle'] ?? data?['courseName'] ?? '')
+            .toString()
+            .trim();
 
-    final existingCourseTitle =
-    (data?['courseTitle'] ?? data?['courseName'] ?? '')
-        .toString()
-        .trim();
+    _selectedClassId =
+    (data?['classId'] ?? '').toString().trim().isEmpty
+        ? null
+        : data!['classId'].toString().trim();
 
-    if (existingCourseTitle.isNotEmpty) {
-      _selectedCourseTitle = existingCourseTitle;
-    }
-
-    final existingClassId =
-    (data?['classId'] ?? '').toString().trim();
-
-    if (existingClassId.isNotEmpty) {
-      _selectedClassId = existingClassId;
-    }
-
-    final existingClassName =
-    (data?['className'] ?? '').toString().trim();
-
-    if (existingClassName.isNotEmpty) {
-      _selectedClassName = existingClassName;
-    }
-
-    // ==========================================================
-    // FILE LAMA
-    // ==========================================================
+    _selectedClassName =
+        (data?['className'] ?? '').toString().trim();
 
     _existingFileUrl =
         (data?['attachmentUrl'] ?? data?['fileUrl'] ?? '')
@@ -143,16 +122,23 @@ class _TeacherAssignmentFormScreenState
             .trim();
 
     _existingFileSize =
-        int.tryParse(
-          (data?['fileSize'] ?? 0).toString(),
-        ) ??
-            0;
+        int.tryParse((data?['fileSize'] ?? 0).toString()) ?? 0;
 
     _existingFileType =
         (data?['fileType'] ?? '').toString().trim();
 
-    _loadCourses();
-    _loadClasses();
+    _initializeForm();
+  }
+
+  Future<void> _initializeForm() async {
+    await _loadTeacherDocumentId();
+
+    if (!mounted) return;
+
+    await Future.wait([
+      _loadCourses(),
+      _loadClasses(),
+    ]);
   }
 
   @override
@@ -161,29 +147,28 @@ class _TeacherAssignmentFormScreenState
     _descriptionController.dispose();
     _instructionsController.dispose();
     _pointsController.dispose();
-
     super.dispose();
   }
 
   // ============================================================
   // GET TEACHER DOCUMENT ID
+  // Prioritas: users.teacherId, kemudian UID/email pada teachers.
+  // Tidak menggunakan fallback teacher_001 secara otomatis.
   // ============================================================
 
-  Future<String?> _getTeacherDocumentId() async {
+  Future<void> _loadTeacherDocumentId() async {
     final user = _auth.currentUser;
 
     if (user == null) {
-      return null;
+      _teacherDocumentId = null;
+      return;
     }
 
     try {
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final userDoc =
+      await _firestore.collection('users').doc(user.uid).get();
 
       final userData = userDoc.data();
-
       final teacherIdFromUser =
       userData?['teacherId']?.toString().trim();
 
@@ -195,155 +180,115 @@ class _TeacherAssignmentFormScreenState
             .get();
 
         if (teacherDoc.exists) {
-          return teacherIdFromUser;
+          _teacherDocumentId = teacherDoc.id;
+          debugPrint('Teacher document ID: $_teacherDocumentId');
+          return;
         }
       }
 
+      // Alternatif jika dokumen teachers menyimpan Firebase UID.
+      final uidQuery = await _firestore
+          .collection('teachers')
+          .where('uid', isEqualTo: user.uid)
+          .limit(1)
+          .get();
+
+      if (uidQuery.docs.isNotEmpty) {
+        _teacherDocumentId = uidQuery.docs.first.id;
+        debugPrint('Teacher document ID: $_teacherDocumentId');
+        return;
+      }
+
+      // Alternatif pencarian menggunakan email akun.
       final email = user.email?.trim();
 
       if (email != null && email.isNotEmpty) {
-        final teacherQuery = await _firestore
+        final emailQuery = await _firestore
             .collection('teachers')
-            .where(
-          'email',
-          isEqualTo: email,
-        )
+            .where('email', isEqualTo: email)
             .limit(1)
             .get();
 
-        if (teacherQuery.docs.isNotEmpty) {
-          return teacherQuery.docs.first.id;
+        if (emailQuery.docs.isNotEmpty) {
+          _teacherDocumentId = emailQuery.docs.first.id;
+          debugPrint('Teacher document ID: $_teacherDocumentId');
+          return;
         }
       }
-    } catch (e) {
-      debugPrint(
-        'Gagal mencari teacher document ID: $e',
-      );
-    }
 
-    return null;
+      _teacherDocumentId = null;
+      debugPrint('Dokumen guru tidak ditemukan untuk UID ${user.uid}');
+    } catch (e) {
+      _teacherDocumentId = null;
+      debugPrint('Gagal mencari ID dokumen guru: $e');
+    }
   }
 
   // ============================================================
   // LOAD COURSES
+  // Course harus menggunakan teacherId yang sama dengan dokumen guru.
   // ============================================================
 
   Future<void> _loadCourses() async {
-    final user = _auth.currentUser;
+    try {
+      final teacherId = _teacherDocumentId;
 
-    if (user == null) {
-      if (mounted) {
+      if (teacherId == null || teacherId.isEmpty) {
+        if (!mounted) return;
         setState(() {
+          _courses = [];
+          _selectedCourseId = null;
+          _selectedCourseTitle = null;
           _loadingCourses = false;
         });
-      }
-
-      return;
-    }
-
-    try {
-      final teacherDocumentId =
-      await _getTeacherDocumentId();
-
-      QuerySnapshot<Map<String, dynamic>> snapshot;
-
-      if (teacherDocumentId != null &&
-          teacherDocumentId.isNotEmpty) {
-        snapshot = await _firestore
-            .collection('courses')
-            .where(
-          'teacherId',
-          isEqualTo: teacherDocumentId,
-        )
-            .get();
-      } else {
-        snapshot = await _firestore
-            .collection('courses')
-            .where(
-          'teacherId',
-          isEqualTo: user.uid,
-        )
-            .get();
-      }
-
-      if (!mounted) {
         return;
       }
 
-      final Map<
-          String,
-          QueryDocumentSnapshot<Map<String, dynamic>>> uniqueCourses = {};
+      final snapshot = await _firestore
+          .collection('courses')
+          .where('teacherId', isEqualTo: teacherId)
+          .get();
 
-      for (final course in snapshot.docs) {
-        uniqueCourses[course.id] = course;
-      }
+      if (!mounted) return;
 
-      final courses = uniqueCourses.values.toList();
+      final courses = snapshot.docs.toList();
 
       courses.sort((a, b) {
         final titleA =
         (a.data()['title'] ?? '').toString().toLowerCase();
-
         final titleB =
         (b.data()['title'] ?? '').toString().toLowerCase();
-
         return titleA.compareTo(titleB);
       });
 
-      String? validSelectedCourseId = _selectedCourseId;
-      String? validSelectedCourseTitle = _selectedCourseTitle;
+      final selectedCourse = courses.where(
+            (course) => course.id == _selectedCourseId,
+      );
 
-      if (validSelectedCourseId != null) {
-        QueryDocumentSnapshot<
-            Map<String, dynamic>>? selectedCourse;
-
-        for (final course in courses) {
-          if (course.id == validSelectedCourseId) {
-            selectedCourse = course;
-            break;
-          }
-        }
-
-        if (selectedCourse != null) {
-          final courseData = selectedCourse.data();
-
-          validSelectedCourseId = selectedCourse.id;
-
-          validSelectedCourseTitle =
-              (courseData['title'] ?? 'Course tanpa nama')
-                  .toString()
-                  .trim();
-
-          if (validSelectedCourseTitle!.isEmpty) {
-            validSelectedCourseTitle = 'Course tanpa nama';
-          }
-        } else {
-          validSelectedCourseId = null;
-          validSelectedCourseTitle = null;
-        }
+      if (selectedCourse.isNotEmpty) {
+        final data = selectedCourse.first.data();
+        _selectedCourseTitle =
+            (data['title'] ?? 'Course tanpa nama').toString().trim();
+      } else {
+        _selectedCourseId = null;
+        _selectedCourseTitle = null;
       }
 
       setState(() {
         _courses = courses;
-        _selectedCourseId = validSelectedCourseId;
-        _selectedCourseTitle = validSelectedCourseTitle;
         _loadingCourses = false;
       });
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
-        _loadingCourses = false;
         _courses = [];
         _selectedCourseId = null;
         _selectedCourseTitle = null;
+        _loadingCourses = false;
       });
 
-      _showMessage(
-        'Gagal mengambil daftar course:\n$e',
-      );
+      _showMessage('Gagal mengambil daftar course:\n$e');
     }
   }
 
@@ -353,81 +298,46 @@ class _TeacherAssignmentFormScreenState
 
   Future<void> _loadClasses() async {
     try {
-      final snapshot = await _firestore
-          .collection('classes')
-          .get();
+      final snapshot = await _firestore.collection('classes').get();
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
-      final Map<
-          String,
-          QueryDocumentSnapshot<Map<String, dynamic>>> uniqueClasses = {};
-
-      for (final classDoc in snapshot.docs) {
-        uniqueClasses[classDoc.id] = classDoc;
-      }
-
-      final classes = uniqueClasses.values.toList();
+      final classes = snapshot.docs.toList();
 
       classes.sort((a, b) {
-        final nameA = _getClassName(a).toLowerCase();
-        final nameB = _getClassName(b).toLowerCase();
-
-        return nameA.compareTo(nameB);
+        return _getClassName(a)
+            .toLowerCase()
+            .compareTo(_getClassName(b).toLowerCase());
       });
 
-      String? validSelectedClassId = _selectedClassId;
-      String? validSelectedClassName = _selectedClassName;
+      final selectedClass = classes.where(
+            (item) => item.id == _selectedClassId,
+      );
 
-      if (validSelectedClassId != null) {
-        QueryDocumentSnapshot<
-            Map<String, dynamic>>? selectedClass;
-
-        for (final classDoc in classes) {
-          if (classDoc.id == validSelectedClassId) {
-            selectedClass = classDoc;
-            break;
-          }
-        }
-
-        if (selectedClass != null) {
-          validSelectedClassId = selectedClass.id;
-          validSelectedClassName = _getClassName(selectedClass);
-        } else {
-          validSelectedClassId = null;
-          validSelectedClassName = null;
-        }
+      if (selectedClass.isNotEmpty) {
+        _selectedClassName = _getClassName(selectedClass.first);
+      } else {
+        _selectedClassId = null;
+        _selectedClassName = null;
       }
 
       setState(() {
         _classes = classes;
-        _selectedClassId = validSelectedClassId;
-        _selectedClassName = validSelectedClassName;
         _loadingClasses = false;
       });
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
-        _loadingClasses = false;
         _classes = [];
         _selectedClassId = null;
         _selectedClassName = null;
+        _loadingClasses = false;
       });
 
-      _showMessage(
-        'Gagal mengambil daftar kelas:\n$e',
-      );
+      _showMessage('Gagal mengambil daftar kelas:\n$e');
     }
   }
-
-  // ============================================================
-  // GET CLASS NAME
-  // ============================================================
 
   String _getClassName(
       QueryDocumentSnapshot<Map<String, dynamic>> classDoc,
@@ -435,31 +345,18 @@ class _TeacherAssignmentFormScreenState
     final data = classDoc.data();
 
     final name = (data['name'] ?? '').toString().trim();
+    if (name.isNotEmpty) return name;
 
-    if (name.isNotEmpty) {
-      return name;
-    }
-
-    final className =
-    (data['className'] ?? '').toString().trim();
-
-    if (className.isNotEmpty) {
-      return className;
-    }
+    final className = (data['className'] ?? '').toString().trim();
+    if (className.isNotEmpty) return className;
 
     return classDoc.id;
   }
 
-  // ============================================================
-  // SELECT COURSE
-  // ============================================================
-
   void _setSelectedCourse(
       QueryDocumentSnapshot<Map<String, dynamic>> course,
       ) {
-    final data = course.data();
-
-    final title = (data['title'] ?? '').toString().trim();
+    final title = (course.data()['title'] ?? '').toString().trim();
 
     setState(() {
       _selectedCourseId = course.id;
@@ -467,10 +364,6 @@ class _TeacherAssignmentFormScreenState
       title.isNotEmpty ? title : 'Course tanpa nama';
     });
   }
-
-  // ============================================================
-  // SELECT CLASS
-  // ============================================================
 
   void _setSelectedClass(
       QueryDocumentSnapshot<Map<String, dynamic>> classDoc,
@@ -486,23 +379,9 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   Future<void> _pickAssignmentFile() async {
-    if (_saving || _uploadingFile) {
-      return;
-    }
+    if (_saving || _uploadingFile) return;
 
     try {
-      // ========================================================
-      // SESUAI DENGAN VERSI FILE_PICKER YANG KAMU PAKAI
-      //
-      // Tidak menggunakan:
-      // - FilePicker.platform
-      // - FilePickerResult
-      // - withData
-      // - result.files.single
-      //
-      // pickFiles() mengembalikan List<PlatformFile>
-      // ========================================================
-
       final List<PlatformFile> result =
           await FilePicker.pickFiles(
             type: FileType.custom,
@@ -523,41 +402,30 @@ class _TeacherAssignmentFormScreenState
           ) ??
               <PlatformFile>[];
 
-      if (result.isEmpty) {
-        return;
-      }
+      if (result.isEmpty) return;
 
       final PlatformFile picked = result.first;
-
       final String? pickedPath = picked.path;
 
       if (pickedPath == null || pickedPath.trim().isEmpty) {
-        _showMessage(
-          'File tidak dapat dibaca dari perangkat.',
-        );
+        _showMessage('File tidak dapat dibaca dari perangkat.');
         return;
       }
 
       final File file = File(pickedPath);
 
       if (!await file.exists()) {
-        _showMessage(
-          'File tidak ditemukan.',
-        );
+        _showMessage('File tidak ditemukan.');
         return;
       }
 
       final String fileName = picked.name.trim();
-
       final String extension = fileName.contains('.')
           ? fileName.split('.').last.toUpperCase()
           : '';
-
       final int fileSize = await file.length();
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
         _selectedFile = file;
@@ -566,20 +434,12 @@ class _TeacherAssignmentFormScreenState
         _selectedFileType = extension;
       });
     } catch (e) {
-      _showMessage(
-        'Gagal memilih file:\n$e',
-      );
+      _showMessage('Gagal memilih file:\n$e');
     }
   }
 
-  // ============================================================
-  // REMOVE SELECTED FILE
-  // ============================================================
-
   void _removeSelectedFile() {
-    if (_saving || _uploadingFile) {
-      return;
-    }
+    if (_saving || _uploadingFile) return;
 
     setState(() {
       _selectedFile = null;
@@ -589,14 +449,8 @@ class _TeacherAssignmentFormScreenState
     });
   }
 
-  // ============================================================
-  // REMOVE EXISTING FILE
-  // ============================================================
-
   void _removeExistingFile() {
-    if (_saving || _uploadingFile) {
-      return;
-    }
+    if (_saving || _uploadingFile) return;
 
     setState(() {
       _existingFileUrl = '';
@@ -611,13 +465,8 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   String _formatFileSize(int bytes) {
-    if (bytes <= 0) {
-      return '-';
-    }
-
-    if (bytes < 1024) {
-      return '$bytes B';
-    }
+    if (bytes <= 0) return '-';
+    if (bytes < 1024) return '$bytes B';
 
     if (bytes < 1024 * 1024) {
       return '${(bytes / 1024).toStringAsFixed(1)} KB';
@@ -635,40 +484,28 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   Future<String?> _uploadAssignmentFile() async {
-    if (_selectedFile == null) {
-      return null;
-    }
+    if (_selectedFile == null) return null;
 
     if (mounted) {
-      setState(() {
-        _uploadingFile = true;
-      });
+      setState(() => _uploadingFile = true);
     }
 
     try {
-      final url =
-      await CloudinaryService.uploadAssignmentFile(
+      final url = await CloudinaryService.uploadAssignmentFile(
         _selectedFile!,
       );
 
       if (url == null || url.trim().isEmpty) {
-        throw Exception(
-          'Cloudinary tidak mengembalikan URL file.',
-        );
+        throw Exception('Cloudinary tidak mengembalikan URL file.');
       }
 
       return url;
     } catch (e) {
-      _showMessage(
-        'Gagal mengunggah dokumen:\n$e',
-      );
-
+      _showMessage('Gagal mengunggah dokumen:\n$e');
       return null;
     } finally {
       if (mounted) {
-        setState(() {
-          _uploadingFile = false;
-        });
+        setState(() => _uploadingFile = false);
       }
     }
   }
@@ -688,11 +525,15 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   Future<void> _saveAssignment() async {
-    if (_saving || _uploadingFile) {
-      return;
-    }
+    if (_saving || _uploadingFile) return;
 
-    if (!_formKey.currentState!.validate()) {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (_teacherDocumentId == null ||
+        _teacherDocumentId!.isEmpty) {
+      _showMessage(
+        'ID guru tidak ditemukan. Periksa data akun di Firestore.',
+      );
       return;
     }
 
@@ -700,9 +541,7 @@ class _TeacherAssignmentFormScreenState
         _selectedCourseId!.isEmpty ||
         _selectedCourseTitle == null ||
         _selectedCourseTitle!.isEmpty) {
-      _showMessage(
-        'Silakan pilih course terlebih dahulu.',
-      );
+      _showMessage('Silakan pilih course terlebih dahulu.');
       return;
     }
 
@@ -710,72 +549,80 @@ class _TeacherAssignmentFormScreenState
         _selectedClassId!.isEmpty ||
         _selectedClassName == null ||
         _selectedClassName!.isEmpty) {
-      _showMessage(
-        'Silakan pilih kelas terlebih dahulu.',
-      );
+      _showMessage('Silakan pilih kelas terlebih dahulu.');
       return;
     }
 
     final user = _auth.currentUser;
 
     if (user == null) {
-      _showMessage(
-        'Akun guru tidak ditemukan.',
-      );
+      _showMessage('Akun guru tidak ditemukan.');
       return;
     }
 
-    setState(() {
-      _saving = true;
-    });
+    setState(() => _saving = true);
 
     try {
-      final points =
-          int.tryParse(
-            _pointsController.text.trim(),
-          ) ??
-              100;
+      final points = int.parse(_pointsController.text.trim());
 
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
+      if (points <= 0 || points > 100) {
+        throw Exception('Nilai maksimal harus antara 1 sampai 100.');
+      }
+
+      // Pastikan course memang milik guru yang sedang login.
+      final courseDoc = await _firestore
+          .collection('courses')
+          .doc(_selectedCourseId)
           .get();
+
+      if (!courseDoc.exists ||
+          courseDoc.data()?['teacherId'] != _teacherDocumentId) {
+        throw Exception(
+          'Course tidak ditemukan atau bukan milik akun guru ini.',
+        );
+      }
+
+      final userDoc =
+      await _firestore.collection('users').doc(user.uid).get();
 
       final userData = userDoc.data();
 
-      final teacherName =
-      (userData?['name'] ??
-          userData?['username'] ??
-          userData?['displayName'] ??
-          user.displayName ??
-          'Guru')
-          .toString();
+      final teacherName = (
+          userData?['name'] ??
+              userData?['username'] ??
+              userData?['displayName'] ??
+              user.displayName ??
+              'Guru'
+      ).toString();
 
-      final teacherDocumentId =
-      await _getTeacherDocumentId();
+      // Saat edit, pastikan assignment memang milik guru ini.
+      if (widget.assignmentId != null) {
+        final assignmentDoc = await _firestore
+            .collection('assignments')
+            .doc(widget.assignmentId)
+            .get();
 
-      // ========================================================
-      // FILE
-      // ========================================================
+        if (!assignmentDoc.exists) {
+          throw Exception('Assignment yang akan diedit tidak ditemukan.');
+        }
+
+        if (assignmentDoc.data()?['teacherId'] != _teacherDocumentId) {
+          throw Exception(
+            'Kamu tidak memiliki izin untuk mengedit assignment ini.',
+          );
+        }
+      }
 
       String fileUrl = _existingFileUrl;
       String fileName = _existingFileName;
       int fileSize = _existingFileSize;
       String fileType = _existingFileType;
 
-      // File baru dipilih
       if (_selectedFile != null) {
-        final uploadedUrl =
-        await _uploadAssignmentFile();
+        final uploadedUrl = await _uploadAssignmentFile();
 
-        if (uploadedUrl == null ||
-            uploadedUrl.trim().isEmpty) {
-          if (mounted) {
-            setState(() {
-              _saving = false;
-            });
-          }
-
+        if (uploadedUrl == null || uploadedUrl.trim().isEmpty) {
+          if (mounted) setState(() => _saving = false);
           return;
         }
 
@@ -785,95 +632,46 @@ class _TeacherAssignmentFormScreenState
         fileType = _selectedFileType;
       }
 
-      // ========================================================
-      // DATA ASSIGNMENT
-      // ========================================================
-
       final data = <String, dynamic>{
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'instructions': _instructionsController.text.trim(),
-
         'courseId': _selectedCourseId,
         'courseTitle': _selectedCourseTitle,
-
         'classId': _selectedClassId,
         'className': _selectedClassName,
-
         'points': points,
-
-        // Canonical teacher ID.
-        'teacherId': teacherDocumentId ?? 'teacher_001',
-
+        'teacherId': _teacherDocumentId,
         'teacherName': teacherName,
-
-        // Attachment utama.
         'attachmentUrl': fileUrl,
-
-        // Legacy compatibility.
         'fileUrl': fileUrl,
-
         'fileName': fileName,
         'fileSize': fileSize,
         'fileType': fileType,
-
+        'dueDate': _dueDate == null
+            ? null
+            : Timestamp.fromDate(_dueDate!),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // ========================================================
-      // DEADLINE
-      // ========================================================
-
-      if (_dueDate != null) {
-        data['dueDate'] = Timestamp.fromDate(_dueDate!);
-      } else {
-        data['dueDate'] = null;
-      }
-
-      // ========================================================
-      // ADD
-      // ========================================================
-
       if (widget.assignmentId == null) {
-        data['createdAt'] =
-            FieldValue.serverTimestamp();
+        data['createdAt'] = FieldValue.serverTimestamp();
 
-        await _firestore
-            .collection('assignments')
-            .add(data);
-      }
-
-      // ========================================================
-      // EDIT
-      // ========================================================
-
-      else {
+        await _firestore.collection('assignments').add(data);
+      } else {
         await _firestore
             .collection('assignments')
             .doc(widget.assignmentId)
             .update(data);
       }
 
-      if (!mounted) {
-        return;
-      }
-
-      Navigator.pop(
-        context,
-        true,
-      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
-      setState(() {
-        _saving = false;
-      });
-
-      _showMessage(
-        'Gagal menyimpan assignment:\n$e',
-      );
+      setState(() => _saving = false);
+      _showMessage('Gagal menyimpan assignment:\n$e');
     }
   }
 
@@ -882,16 +680,12 @@ class _TeacherAssignmentFormScreenState
   // ============================================================
 
   void _showMessage(String message) {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
+        SnackBar(content: Text(message)),
       );
   }
 
@@ -954,140 +748,38 @@ class _TeacherAssignmentFormScreenState
                 ),
               ],
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'Upload file tugas yang akan digunakan oleh siswa.',
               style: theme.textTheme.bodySmall,
             ),
-
             const SizedBox(height: 14),
-
-            // ==================================================
-            // FILE BARU
-            // ==================================================
-
             if (hasNewFile)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _fileIcon(_selectedFileType),
-                      size: 34,
-                      color:
-                      theme.colorScheme.onPrimaryContainer,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _selectedFileName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                            theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${_selectedFileType.isEmpty ? 'FILE' : _selectedFileType} • '
-                                '${_formatFileSize(_selectedFileSize)}',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed:
-                      _saving || _uploadingFile
-                          ? null
-                          : _removeSelectedFile,
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
+              _buildFileTile(
+                theme: theme,
+                name: _selectedFileName,
+                type: _selectedFileType,
+                size: _selectedFileSize,
+                onRemove: _removeSelectedFile,
+                isNew: true,
               )
-
-            // ==================================================
-            // FILE LAMA
-            // ==================================================
-
             else if (hasExistingFile)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color:
-                  theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _fileIcon(_existingFileType),
-                      size: 34,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _existingFileName.isEmpty
-                                ? 'Dokumen tugas'
-                                : _existingFileName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                            theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${_existingFileType.isEmpty ? 'FILE' : _existingFileType} • '
-                                '${_formatFileSize(_existingFileSize)}',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Hapus lampiran',
-                      onPressed:
-                      _saving || _uploadingFile
-                          ? null
-                          : _removeExistingFile,
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ],
-                ),
+              _buildFileTile(
+                theme: theme,
+                name: _existingFileName.isEmpty
+                    ? 'Dokumen tugas'
+                    : _existingFileName,
+                type: _existingFileType,
+                size: _existingFileSize,
+                onRemove: _removeExistingFile,
+                isNew: false,
               )
-
-            // ==================================================
-            // TIDAK ADA FILE
-            // ==================================================
-
             else
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color:
-                  theme.colorScheme.surfaceContainerHighest,
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
@@ -1095,45 +787,29 @@ class _TeacherAssignmentFormScreenState
                     Icon(
                       Icons.insert_drive_file_outlined,
                       size: 32,
-                      color:
-                      theme.colorScheme.onSurfaceVariant,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Belum ada dokumen tugas.',
-                        style: theme.textTheme.bodyMedium,
-                      ),
+                    const Expanded(
+                      child: Text('Belum ada dokumen tugas.'),
                     ),
                   ],
                 ),
               ),
-
             const SizedBox(height: 14),
-
-            // ==================================================
-            // PICK FILE BUTTON
-            // ==================================================
-
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed:
-                _saving || _uploadingFile
+                onPressed: _saving || _uploadingFile
                     ? null
                     : _pickAssignmentFile,
-                icon:
-                _uploadingFile
+                icon: _uploadingFile
                     ? const SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                  ),
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 )
-                    : const Icon(
-                  Icons.upload_file_outlined,
-                ),
+                    : const Icon(Icons.upload_file_outlined),
                 label: Text(
                   _uploadingFile
                       ? 'Mengunggah...'
@@ -1143,12 +819,10 @@ class _TeacherAssignmentFormScreenState
                 ),
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'Format: PDF, DOC, DOCX, PPT, PPTX, '
-                  'XLS, XLSX, ZIP, RAR, JPG, JPEG, PNG.',
+                  'XLS, XLSX, ZIP, RAR, JPG, JPEG, PNG. Maksimal 20 MB.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -1159,36 +833,83 @@ class _TeacherAssignmentFormScreenState
     );
   }
 
-  // ============================================================
-  // FILE ICON
-  // ============================================================
+  Widget _buildFileTile({
+    required ThemeData theme,
+    required String name,
+    required String type,
+    required int size,
+    required VoidCallback onRemove,
+    required bool isNew,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isNew
+            ? theme.colorScheme.primaryContainer
+            : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _fileIcon(type),
+            size: 34,
+            color: isNew
+                ? theme.colorScheme.onPrimaryContainer
+                : theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${type.isEmpty ? 'FILE' : type} • ${_formatFileSize(size)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: isNew ? 'Batalkan file baru' : 'Hapus lampiran',
+            onPressed: _saving || _uploadingFile ? null : onRemove,
+            icon: Icon(isNew ? Icons.close : Icons.delete_outline),
+          ),
+        ],
+      ),
+    );
+  }
 
   IconData _fileIcon(String type) {
     switch (type.toUpperCase()) {
       case 'PDF':
         return Icons.picture_as_pdf_outlined;
-
       case 'DOC':
       case 'DOCX':
         return Icons.description_outlined;
-
       case 'PPT':
       case 'PPTX':
         return Icons.slideshow_outlined;
-
       case 'XLS':
       case 'XLSX':
         return Icons.table_chart_outlined;
-
       case 'ZIP':
       case 'RAR':
         return Icons.folder_zip_outlined;
-
       case 'JPG':
       case 'JPEG':
       case 'PNG':
         return Icons.image_outlined;
-
       default:
         return Icons.insert_drive_file_outlined;
     }
@@ -1216,8 +937,28 @@ class _TeacherAssignmentFormScreenState
               ),
               const SizedBox(width: 12),
               const Expanded(
+                child: Text('Memuat course dan kelas...'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_teacherDocumentId == null) {
+      return const Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline, color: Colors.red),
+              SizedBox(width: 12),
+              Expanded(
                 child: Text(
-                  'Memuat course dan kelas...',
+                  'ID dokumen guru tidak ditemukan. '
+                      'Periksa hubungan akun pada koleksi users dan teachers.',
                 ),
               ),
             ],
@@ -1227,25 +968,19 @@ class _TeacherAssignmentFormScreenState
     }
 
     if (_courses.isEmpty) {
-      return Card(
+      return const Card(
         margin: EdgeInsets.zero,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16),
           child: Row(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.info_outline,
-                color: theme.colorScheme.error,
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
+              Icon(Icons.info_outline, color: Colors.red),
+              SizedBox(width: 12),
+              Expanded(
                 child: Text(
-                  'Belum ada course yang tersedia '
-                      'untuk guru ini.\n\n'
-                      'Buat course terlebih dahulu '
-                      'sebelum menambahkan assignment.',
+                  'Belum ada course untuk guru ini. '
+                      'Pastikan teacherId pada course sesuai dengan ID dokumen guru.',
                 ),
               ),
             ],
@@ -1255,23 +990,17 @@ class _TeacherAssignmentFormScreenState
     }
 
     if (_classes.isEmpty) {
-      return Card(
+      return const Card(
         margin: EdgeInsets.zero,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16),
           child: Row(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.info_outline,
-                color: theme.colorScheme.error,
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Belum ada kelas yang tersedia.',
-                ),
+              Icon(Icons.info_outline, color: Colors.red),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('Belum ada kelas yang tersedia.'),
               ),
             ],
           ),
@@ -1279,37 +1008,22 @@ class _TeacherAssignmentFormScreenState
       );
     }
 
-    String? courseDropdownValue;
+    final courseDropdownValue =
+    _courses.any((course) => course.id == _selectedCourseId)
+        ? _selectedCourseId
+        : null;
 
-    if (_selectedCourseId != null) {
-      final matchingCourses = _courses.where(
-            (course) => course.id == _selectedCourseId,
-      );
-
-      if (matchingCourses.length == 1) {
-        courseDropdownValue = _selectedCourseId;
-      }
-    }
-
-    String? classDropdownValue;
-
-    if (_selectedClassId != null) {
-      final matchingClasses = _classes.where(
-            (classDoc) => classDoc.id == _selectedClassId,
-      );
-
-      if (matchingClasses.length == 1) {
-        classDropdownValue = _selectedClassId;
-      }
-    }
+    final classDropdownValue =
+    _classes.any((item) => item.id == _selectedClassId)
+        ? _selectedClassId
+        : null;
 
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1326,23 +1040,17 @@ class _TeacherAssignmentFormScreenState
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
-
             DropdownButtonFormField<String>(
               value: courseDropdownValue,
               isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Pilih Course',
-                prefixIcon: Icon(
-                  Icons.library_books_outlined,
-                ),
+                prefixIcon: Icon(Icons.library_books_outlined),
               ),
               items: _courses.map((course) {
-                final data = course.data();
-
                 final title =
-                (data['title'] ?? 'Course tanpa nama')
+                (course.data()['title'] ?? 'Course tanpa nama')
                     .toString();
 
                 return DropdownMenuItem<String>(
@@ -1353,50 +1061,30 @@ class _TeacherAssignmentFormScreenState
                   ),
                 );
               }).toList(),
-              onChanged:
-              _saving
+              onChanged: _saving
                   ? null
                   : (courseId) {
-                if (courseId == null) {
-                  return;
-                }
-
-                QueryDocumentSnapshot<
-                    Map<String, dynamic>>?
-                selected;
+                if (courseId == null) return;
 
                 for (final course in _courses) {
                   if (course.id == courseId) {
-                    selected = course;
+                    _setSelectedCourse(course);
                     break;
                   }
                 }
-
-                if (selected != null) {
-                  _setSelectedCourse(
-                    selected,
-                  );
-                }
               },
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Course wajib dipilih';
-                }
-
-                return null;
-              },
+              validator: (value) =>
+              value == null || value.isEmpty
+                  ? 'Course wajib dipilih'
+                  : null,
             ),
-
             const SizedBox(height: 16),
-
             DropdownButtonFormField<String>(
               value: classDropdownValue,
               isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Pilih Kelas',
-                prefixIcon: Icon(
-                  Icons.groups_outlined,
-                ),
+                prefixIcon: Icon(Icons.groups_outlined),
               ),
               items: _classes.map((classDoc) {
                 return DropdownMenuItem<String>(
@@ -1407,38 +1095,22 @@ class _TeacherAssignmentFormScreenState
                   ),
                 );
               }).toList(),
-              onChanged:
-              _saving
+              onChanged: _saving
                   ? null
                   : (classId) {
-                if (classId == null) {
-                  return;
-                }
-
-                QueryDocumentSnapshot<
-                    Map<String, dynamic>>?
-                selected;
+                if (classId == null) return;
 
                 for (final classDoc in _classes) {
                   if (classDoc.id == classId) {
-                    selected = classDoc;
+                    _setSelectedClass(classDoc);
                     break;
                   }
                 }
-
-                if (selected != null) {
-                  _setSelectedClass(
-                    selected,
-                  );
-                }
               },
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Kelas wajib dipilih';
-                }
-
-                return null;
-              },
+              validator: (value) =>
+              value == null || value.isEmpty
+                  ? 'Kelas wajib dipilih'
+                  : null,
             ),
           ],
         ),
@@ -1468,8 +1140,7 @@ class _TeacherAssignmentFormScreenState
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -1486,28 +1157,21 @@ class _TeacherAssignmentFormScreenState
                 ),
               ],
             ),
-
             const SizedBox(height: 12),
-
             CalendarDatePicker(
               initialDate: initialDate,
               firstDate: today,
               lastDate: DateTime(2100),
               onDateChanged: (date) {
-                setState(() {
-                  _dueDate = date;
-                });
+                setState(() => _dueDate = date);
               },
             ),
-
             const SizedBox(height: 8),
-
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color:
-                theme.colorScheme.surfaceContainerHighest,
+                color: theme.colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1522,10 +1186,8 @@ class _TeacherAssignmentFormScreenState
                     child: Text(
                       _dueDate == null
                           ? 'Belum memilih deadline'
-                          : 'Deadline: '
-                          '${_formatDate(_dueDate!)}',
-                      style:
-                      theme.textTheme.bodyMedium?.copyWith(
+                          : 'Deadline: ${_formatDate(_dueDate!)}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1533,14 +1195,9 @@ class _TeacherAssignmentFormScreenState
                   if (_dueDate != null)
                     IconButton(
                       tooltip: 'Hapus deadline',
-                      onPressed:
-                      _saving
+                      onPressed: _saving
                           ? null
-                          : () {
-                        setState(() {
-                          _dueDate = null;
-                        });
-                      },
+                          : () => setState(() => _dueDate = null),
                       icon: const Icon(Icons.close),
                     ),
                 ],
@@ -1563,138 +1220,75 @@ class _TeacherAssignmentFormScreenState
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isEdit
-              ? 'Edit Assignment'
-              : 'Tambah Assignment',
+          widget.isEdit ? 'Edit Assignment' : 'Tambah Assignment',
         ),
       ),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            16,
-            16,
-            32,
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
-            // ==================================================
-            // TITLE
-            // ==================================================
-
             _buildTextField(
               controller: _titleController,
               label: 'Judul Tugas',
               icon: Icons.assignment_outlined,
               validator: (value) {
-                if (value == null ||
-                    value.trim().isEmpty) {
+                if (value == null || value.trim().isEmpty) {
                   return 'Judul tugas wajib diisi';
                 }
-
                 return null;
               },
             ),
-
             const SizedBox(height: 16),
-
-            // ==================================================
-            // DESCRIPTION
-            // ==================================================
-
             _buildTextField(
               controller: _descriptionController,
               label: 'Deskripsi',
               icon: Icons.description_outlined,
               maxLines: 4,
             ),
-
             const SizedBox(height: 16),
-
-            // ==================================================
-            // INSTRUCTIONS
-            // ==================================================
-
             _buildTextField(
               controller: _instructionsController,
               label: 'Instruksi',
               icon: Icons.rule_outlined,
               maxLines: 4,
             ),
-
             const SizedBox(height: 16),
-
-            // ==================================================
-            // COURSE + CLASS
-            // ==================================================
-
             _buildCourseClassSection(theme),
-
             const SizedBox(height: 16),
-
-            // ==================================================
-            // FILE
-            // ==================================================
-
             _buildFileSection(theme),
-
             const SizedBox(height: 16),
-
-            // ==================================================
-            // POINT
-            // ==================================================
-
             _buildTextField(
               controller: _pointsController,
               label: 'Nilai Maksimal',
               icon: Icons.star_outline,
               keyboardType: TextInputType.number,
               validator: (value) {
-                final points = int.tryParse(
-                  value?.trim() ?? '',
-                );
+                final points = int.tryParse(value?.trim() ?? '');
 
-                if (points == null || points <= 0) {
-                  return 'Nilai maksimal harus lebih dari 0';
+                if (points == null || points < 1 || points > 100) {
+                  return 'Nilai maksimal harus antara 1 sampai 100';
                 }
 
                 return null;
               },
             ),
-
             const SizedBox(height: 20),
-
-            // ==================================================
-            // DEADLINE
-            // ==================================================
-
             _buildDateSection(theme),
-
             const SizedBox(height: 24),
-
-            // ==================================================
-            // SAVE
-            // ==================================================
-
             SizedBox(
               height: 52,
               child: FilledButton.icon(
-                onPressed:
-                _saving || _uploadingFile
+                onPressed: _saving || _uploadingFile
                     ? null
                     : _saveAssignment,
-                icon:
-                _saving || _uploadingFile
+                icon: _saving || _uploadingFile
                     ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                  ),
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 )
-                    : const Icon(
-                  Icons.save_outlined,
-                ),
+                    : const Icon(Icons.save_outlined),
                 label: Text(
                   _uploadingFile
                       ? 'Mengunggah dokumen...'

@@ -15,13 +15,9 @@ class TeacherExamsScreen extends StatefulWidget {
       _TeacherExamsScreenState();
 }
 
-class _TeacherExamsScreenState
-    extends State<TeacherExamsScreen> {
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
-
-  final FirebaseAuth _auth =
-      FirebaseAuth.instance;
+class _TeacherExamsScreenState extends State<TeacherExamsScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   String? _teacherId;
   bool _loadingTeacher = true;
@@ -47,8 +43,7 @@ class _TeacherExamsScreenState
           .doc(user.uid)
           .get();
 
-      final teacherId = userDoc
-          .data()?['teacherId']
+      final teacherId = userDoc.data()?['teacherId']
           ?.toString()
           .trim();
 
@@ -73,7 +68,7 @@ class _TeacherExamsScreenState
           return teacherQuery.docs.first.id;
         }
       } catch (_) {
-        // Data guru tidak ditemukan.
+        // Data guru tidak ditemukan atau gagal diakses.
       }
     }
 
@@ -81,6 +76,12 @@ class _TeacherExamsScreenState
   }
 
   Future<void> _loadTeacherId() async {
+    if (mounted) {
+      setState(() {
+        _loadingTeacher = true;
+      });
+    }
+
     final teacherId = await _getTeacherDocumentId();
 
     if (!mounted) return;
@@ -99,7 +100,7 @@ class _TeacherExamsScreenState
     String? examId,
     Map<String, dynamic>? examData,
   }) async {
-    final result = await Navigator.push(
+    final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => TeacherExamFormScreen(
@@ -132,7 +133,7 @@ class _TeacherExamsScreenState
       String examId,
       String title,
       ) async {
-    final result = await Navigator.push(
+    final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => TeacherExamDeleteScreen(
@@ -244,19 +245,14 @@ class _TeacherExamsScreenState
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
+                const Text(
                   'Pastikan akun Anda sudah terhubung '
                       'dengan data guru di Firestore.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _loadingTeacher = true;
-                    });
-                    _loadTeacherId();
-                  },
+                  onPressed: _loadTeacherId,
                   icon: const Icon(Icons.refresh),
                   label: const Text('Coba Lagi'),
                 ),
@@ -283,15 +279,13 @@ class _TeacherExamsScreenState
       // STREAM EXAMS
       // ========================================================
 
-      body: StreamBuilder<
-          QuerySnapshot<Map<String, dynamic>>>(
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: _firestore
             .collection('exams')
             .where('teacherId', isEqualTo: _teacherId)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState ==
-              ConnectionState.waiting &&
+          if (snapshot.connectionState == ConnectionState.waiting &&
               !snapshot.hasData) {
             return const Center(
               child: CircularProgressIndicator(),
@@ -320,6 +314,14 @@ class _TeacherExamsScreenState
                       '${snapshot.error}',
                       textAlign: TextAlign.center,
                     ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {});
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Muat Ulang'),
+                    ),
                   ],
                 ),
               ),
@@ -345,8 +347,8 @@ class _TeacherExamsScreenState
             itemBuilder: (context, index) {
               final doc = docs[index];
               final data = doc.data();
-              final title =
-              (data['title'] ?? 'Ujian').toString();
+
+              final title = (data['title'] ?? 'Ujian').toString();
 
               return _ExamCard(
                 examId: doc.id,
@@ -413,7 +415,7 @@ class _TeacherExamsScreenState
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Tambahkan ujian pertama Anda.',
               textAlign: TextAlign.center,
             ),
@@ -456,24 +458,15 @@ class _ExamCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final title =
-    (data['title'] ?? 'Tanpa Judul').toString();
-    final description =
-    (data['description'] ?? '').toString();
-    final course =
-    (data['courseName'] ?? '').toString();
-    final classId =
-    (data['classId'] ?? '-').toString();
-    final date =
-    (data['date'] ?? '-').toString();
-    final start =
-    (data['startTime'] ?? '-').toString();
-    final end =
-    (data['endTime'] ?? '-').toString();
-    final room =
-    (data['room'] ?? '-').toString();
-    final duration =
-    (data['duration'] ?? 60).toString();
+    final title = (data['title'] ?? 'Tanpa Judul').toString();
+    final description = (data['description'] ?? '').toString();
+    final course = (data['courseName'] ?? '').toString();
+    final classId = (data['classId'] ?? '-').toString();
+    final date = (data['date'] ?? '-').toString();
+    final start = (data['startTime'] ?? '-').toString();
+    final end = (data['endTime'] ?? '-').toString();
+    final room = (data['room'] ?? '-').toString();
+    final duration = (data['duration'] ?? 60).toString();
 
     return Card(
       clipBehavior: Clip.antiAlias,

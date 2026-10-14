@@ -19,7 +19,9 @@ class TeacherDiscussionDetailScreen extends StatefulWidget {
 
 class _TeacherDiscussionDetailScreenState
     extends State<TeacherDiscussionDetailScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore =
+      FirebaseFirestore.instance;
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   final TextEditingController _commentController =
@@ -113,16 +115,26 @@ class _TeacherDiscussionDetailScreenState
               data['username'] ??
               data['displayName'] ??
               user.displayName ??
-              'Guru'
+              ''
       ).toString().trim();
 
       if (name.isNotEmpty) {
         return name;
       }
     } catch (e) {
-      debugPrint(
-        'ERROR GET TEACHER NAME: $e',
-      );
+      debugPrint('ERROR GET TEACHER NAME: $e');
+    }
+
+    final displayName = user.displayName?.trim() ?? '';
+
+    if (displayName.isNotEmpty) {
+      return displayName;
+    }
+
+    final email = user.email?.trim() ?? '';
+
+    if (email.isNotEmpty) {
+      return email.split('@').first;
     }
 
     return 'Guru';
@@ -133,26 +145,27 @@ class _TeacherDiscussionDetailScreenState
   // ============================================================
 
   Future<void> _sendComment() async {
+    if (_sending) {
+      return;
+    }
+
     final content = _commentController.text.trim();
 
     if (content.isEmpty) {
+      _showMessage(
+        'Isi balasan belum diisi.',
+        isError: true,
+      );
       return;
     }
 
     final user = _auth.currentUser;
 
     if (user == null) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Guru belum login.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
+      _showMessage(
+        'Guru belum login.',
+        isError: true,
       );
-
       return;
     }
 
@@ -163,11 +176,18 @@ class _TeacherDiscussionDetailScreenState
     try {
       final teacherName = await _getTeacherName();
 
-      await _firestore
+      // Pastikan dokumen diskusi masih tersedia.
+      final discussionRef = _firestore
           .collection('discussions')
-          .doc(widget.discussionId)
-          .collection('comments')
-          .add({
+          .doc(widget.discussionId);
+
+      final discussionDoc = await discussionRef.get();
+
+      if (!discussionDoc.exists) {
+        throw Exception('Diskusi tidak ditemukan.');
+      }
+
+      await discussionRef.collection('comments').add({
         'discussionId': widget.discussionId,
         'userId': user.uid,
         'username': teacherName,
@@ -178,29 +198,22 @@ class _TeacherDiscussionDetailScreenState
 
       _commentController.clear();
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       FocusScope.of(context).unfocus();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Balasan berhasil dikirim.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showMessage('Balasan berhasil dikirim.');
     } catch (e) {
-      if (!mounted) return;
+      debugPrint('ERROR SEND COMMENT: $e');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal mengirim balasan: $e',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (mounted) {
+        _showMessage(
+          'Gagal mengirim balasan: $e',
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -221,6 +234,10 @@ class _TeacherDiscussionDetailScreenState
     final user = _auth.currentUser;
 
     if (user == null) {
+      _showMessage(
+        'Anda belum login.',
+        isError: true,
+      );
       return;
     }
 
@@ -231,7 +248,12 @@ class _TeacherDiscussionDetailScreenState
             ''
     ).toString();
 
+    // Hanya pemilik komentar yang dapat mengedit.
     if (ownerId != user.uid) {
+      _showMessage(
+        'Anda tidak memiliki izin untuk mengedit balasan ini.',
+        isError: true,
+      );
       return;
     }
 
@@ -243,16 +265,13 @@ class _TeacherDiscussionDetailScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text(
-            'Edit Balasan',
-          ),
+          title: const Text('Edit Balasan'),
           content: TextField(
             controller: controller,
             autofocus: true,
             minLines: 3,
             maxLines: 6,
-            textCapitalization:
-            TextCapitalization.sentences,
+            textCapitalization: TextCapitalization.sentences,
             decoration: InputDecoration(
               hintText: 'Tulis balasan...',
               border: OutlineInputBorder(
@@ -265,9 +284,7 @@ class _TeacherDiscussionDetailScreenState
               onPressed: () {
                 Navigator.pop(dialogContext);
               },
-              child: const Text(
-                'Batal',
-              ),
+              child: const Text('Batal'),
             ),
             FilledButton(
               onPressed: () {
@@ -277,14 +294,9 @@ class _TeacherDiscussionDetailScreenState
                   return;
                 }
 
-                Navigator.pop(
-                  dialogContext,
-                  value,
-                );
+                Navigator.pop(dialogContext, value);
               },
-              child: const Text(
-                'Simpan',
-              ),
+              child: const Text('Simpan'),
             ),
           ],
         );
@@ -298,37 +310,53 @@ class _TeacherDiscussionDetailScreenState
     }
 
     try {
-      await _firestore
+      final commentRef = _firestore
           .collection('discussions')
           .doc(widget.discussionId)
           .collection('comments')
-          .doc(commentId)
-          .update({
+          .doc(commentId);
+
+      // Verifikasi ulang pemilik berdasarkan data terbaru.
+      final latestComment = await commentRef.get();
+
+      if (!latestComment.exists) {
+        throw Exception('Balasan tidak ditemukan.');
+      }
+
+      final latestData = latestComment.data() ?? {};
+
+      final latestOwnerId = (
+          latestData['userId'] ??
+              latestData['authorId'] ??
+              latestData['uid'] ??
+              ''
+      ).toString();
+
+      if (latestOwnerId != user.uid) {
+        throw Exception(
+          'Anda tidak memiliki izin untuk mengedit balasan ini.',
+        );
+      }
+
+      await commentRef.update({
         'content': result.trim(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Balasan berhasil diperbarui.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showMessage('Balasan berhasil diperbarui.');
     } catch (e) {
-      if (!mounted) return;
+      debugPrint('ERROR EDIT COMMENT: $e');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal memperbarui balasan: $e',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (mounted) {
+        _showMessage(
+          'Gagal memperbarui balasan: $e',
+          isError: true,
+        );
+      }
     }
   }
 
@@ -343,6 +371,10 @@ class _TeacherDiscussionDetailScreenState
     final user = _auth.currentUser;
 
     if (user == null) {
+      _showMessage(
+        'Anda belum login.',
+        isError: true,
+      );
       return;
     }
 
@@ -353,7 +385,12 @@ class _TeacherDiscussionDetailScreenState
             ''
     ).toString();
 
+    // Hanya pemilik komentar yang dapat menghapus.
     if (ownerId != user.uid) {
+      _showMessage(
+        'Anda tidak memiliki izin untuk menghapus balasan ini.',
+        isError: true,
+      );
       return;
     }
 
@@ -361,23 +398,16 @@ class _TeacherDiscussionDetailScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text(
-            'Hapus Balasan?',
-          ),
+          title: const Text('Hapus Balasan?'),
           content: const Text(
             'Balasan ini akan dihapus secara permanen.',
           ),
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  false,
-                );
+                Navigator.pop(dialogContext, false);
               },
-              child: const Text(
-                'Batal',
-              ),
+              child: const Text('Batal'),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -385,14 +415,9 @@ class _TeacherDiscussionDetailScreenState
                 foregroundColor: Colors.white,
               ),
               onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  true,
-                );
+                Navigator.pop(dialogContext, true);
               },
-              child: const Text(
-                'Hapus',
-              ),
+              child: const Text('Hapus'),
             ),
           ],
         );
@@ -404,35 +429,74 @@ class _TeacherDiscussionDetailScreenState
     }
 
     try {
-      await _firestore
+      final commentRef = _firestore
           .collection('discussions')
           .doc(widget.discussionId)
           .collection('comments')
-          .doc(commentId)
-          .delete();
+          .doc(commentId);
 
-      if (!mounted) return;
+      // Verifikasi ulang pemilik sebelum menghapus.
+      final latestComment = await commentRef.get();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Balasan berhasil dihapus.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (!latestComment.exists) {
+        throw Exception('Balasan tidak ditemukan.');
+      }
+
+      final latestData = latestComment.data() ?? {};
+
+      final latestOwnerId = (
+          latestData['userId'] ??
+              latestData['authorId'] ??
+              latestData['uid'] ??
+              ''
+      ).toString();
+
+      if (latestOwnerId != user.uid) {
+        throw Exception(
+          'Anda tidak memiliki izin untuk menghapus balasan ini.',
+        );
+      }
+
+      await commentRef.delete();
+
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage('Balasan berhasil dihapus.');
     } catch (e) {
-      if (!mounted) return;
+      debugPrint('ERROR DELETE COMMENT: $e');
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        _showMessage(
+          'Gagal menghapus balasan: $e',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  // ============================================================
+  // MESSAGE
+  // ============================================================
+
+  void _showMessage(
+      String message, {
+        bool isError = false,
+      }) {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
         SnackBar(
-          content: Text(
-            'Gagal menghapus balasan: $e',
-          ),
+          content: Text(message),
           behavior: SnackBarBehavior.floating,
+          backgroundColor: isError ? Colors.red : null,
         ),
       );
-    }
   }
 
   // ============================================================
@@ -441,30 +505,21 @@ class _TeacherDiscussionDetailScreenState
 
   @override
   Widget build(BuildContext context) {
-    final title = _getString(
-      'title',
-      'Diskusi',
-    );
+    final title = _getString('title', 'Diskusi');
 
     final content = _getString(
       'content',
       'Tidak ada isi diskusi.',
     );
 
-    final subject = _getString(
-      'subject',
-      '',
-    );
+    final subject = _getString('subject', '');
 
     final className = _getString(
       'className',
       _getString('classId', '-'),
     );
 
-    final username = _getString(
-      'username',
-      'Siswa',
-    );
+    final username = _getString('username', 'Siswa');
 
     final createdAt = _getDate(
       widget.discussionData['createdAt'],
@@ -472,28 +527,20 @@ class _TeacherDiscussionDetailScreenState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Detail Diskusi',
-        ),
+        title: const Text('Detail Diskusi'),
         centerTitle: true,
       ),
       body: Column(
         children: [
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _firestore
                   .collection('discussions')
                   .doc(widget.discussionId)
                   .collection('comments')
-                  .orderBy(
-                'createdAt',
-                descending: false,
-              )
+                  .orderBy('createdAt')
                   .snapshots(),
-              builder: (
-                  context,
-                  snapshot,
-                  ) {
+              builder: (context, snapshot) {
                 return ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
@@ -538,7 +585,8 @@ class _TeacherDiscussionDetailScreenState
                     const SizedBox(height: 12),
 
                     if (snapshot.connectionState ==
-                        ConnectionState.waiting)
+                        ConnectionState.waiting &&
+                        !snapshot.hasData)
                       const Padding(
                         padding: EdgeInsets.all(20),
                         child: Center(
@@ -553,29 +601,19 @@ class _TeacherDiscussionDetailScreenState
                           snapshot.data!.docs.isEmpty)
                         _buildEmptyComments()
                       else
-                        ...snapshot.data!.docs.map(
-                              (doc) {
-                            final data =
-                            doc.data()
-                            as Map<String, dynamic>;
+                        ...snapshot.data!.docs.map((doc) {
+                          final data = doc.data();
 
-                            return _CommentCard(
-                              data: data,
-                              onEdit: () {
-                                _editComment(
-                                  doc.id,
-                                  data,
-                                );
-                              },
-                              onDelete: () {
-                                _deleteComment(
-                                  doc.id,
-                                  data,
-                                );
-                              },
-                            );
-                          },
-                        ),
+                          return _CommentCard(
+                            data: data,
+                            onEdit: () {
+                              _editComment(doc.id, data);
+                            },
+                            onDelete: () {
+                              _deleteComment(doc.id, data);
+                            },
+                          );
+                        }),
 
                     const SizedBox(height: 20),
                   ],
@@ -610,25 +648,19 @@ class _TeacherDiscussionDetailScreenState
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: theme
-            .colorScheme
-            .surfaceContainerHighest
+        color: theme.colorScheme.surfaceContainerHighest
             .withOpacity(0.35),
       ),
       child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: theme
-                    .colorScheme
-                    .primary
-                    .withOpacity(0.12),
+                backgroundColor:
+                theme.colorScheme.primary.withOpacity(0.12),
                 child: Icon(
                   Icons.person_rounded,
                   color: theme.colorScheme.primary,
@@ -639,8 +671,7 @@ class _TeacherDiscussionDetailScreenState
 
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       username,
@@ -702,10 +733,7 @@ class _TeacherDiscussionDetailScreenState
               ),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                color: theme
-                    .colorScheme
-                    .primary
-                    .withOpacity(0.1),
+                color: theme.colorScheme.primary.withOpacity(0.1),
               ),
               child: Text(
                 subject,
@@ -806,9 +834,7 @@ class _TeacherDiscussionDetailScreenState
   // COMMENT ERROR
   // ============================================================
 
-  Widget _buildCommentError(
-      String error,
-      ) {
+  Widget _buildCommentError(String error) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -832,16 +858,9 @@ class _TeacherDiscussionDetailScreenState
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          12,
-          10,
-          12,
-          10,
-        ),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         decoration: BoxDecoration(
-          color: Theme.of(context)
-              .colorScheme
-              .surface,
+          color: Theme.of(context).colorScheme.surface,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.08),
@@ -851,24 +870,20 @@ class _TeacherDiscussionDetailScreenState
           ],
         ),
         child: Row(
-          crossAxisAlignment:
-          CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Expanded(
               child: TextField(
                 controller: _commentController,
                 minLines: 1,
                 maxLines: 4,
-                textInputAction:
-                TextInputAction.newline,
+                textInputAction: TextInputAction.newline,
                 decoration: InputDecoration(
                   hintText: 'Tulis balasan untuk siswa...',
                   border: OutlineInputBorder(
-                    borderRadius:
-                    BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  contentPadding:
-                  const EdgeInsets.symmetric(
+                  contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 12,
                   ),
@@ -882,21 +897,17 @@ class _TeacherDiscussionDetailScreenState
               width: 48,
               height: 48,
               child: IconButton.filled(
-                onPressed:
-                _sending ? null : _sendComment,
+                onPressed: _sending ? null : _sendComment,
                 icon: _sending
                     ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child:
-                  CircularProgressIndicator(
+                  child: CircularProgressIndicator(
                     strokeWidth: 2,
                     color: Colors.white,
                   ),
                 )
-                    : const Icon(
-                  Icons.send_rounded,
-                ),
+                    : const Icon(Icons.send_rounded),
               ),
             ),
           ],
@@ -931,8 +942,7 @@ class _CommentCard extends StatelessWidget {
     }
 
     if (value is String) {
-      return DateTime.tryParse(value) ??
-          DateTime(2000);
+      return DateTime.tryParse(value) ?? DateTime(2000);
     }
 
     return DateTime(2000);
@@ -943,27 +953,18 @@ class _CommentCard extends StatelessWidget {
       return '-';
     }
 
-    final day =
-    date.day.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final year = date.year.toString();
 
-    final month =
-    date.month.toString().padLeft(2, '0');
-
-    final year =
-    date.year.toString();
-
-    final hour =
-    date.hour.toString().padLeft(2, '0');
-
-    final minute =
-    date.minute.toString().padLeft(2, '0');
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
 
     return '$day/$month/$year • $hour:$minute';
   }
 
   bool _isOwner() {
-    final user =
-        FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       return false;
@@ -976,40 +977,23 @@ class _CommentCard extends StatelessWidget {
             ''
     ).toString();
 
-    return ownerId.isNotEmpty &&
-        ownerId == user.uid;
+    return ownerId.isNotEmpty && ownerId == user.uid;
   }
 
   @override
   Widget build(BuildContext context) {
-    final username =
-    (data['username'] ?? 'Pengguna').toString();
+    final username = (data['username'] ?? 'Pengguna').toString();
+    final content = (data['content'] ?? '').toString();
 
-    final content =
-    (data['content'] ?? '').toString();
+    final createdAt = _getDate(data['createdAt']);
+    final isEdited = data['updatedAt'] != null;
 
-    final createdAt =
-    _getDate(data['createdAt']);
-
-    final updatedAt =
-    data['updatedAt'];
-
-    final isEdited =
-        updatedAt != null;
-
-    final isOwner =
-    _isOwner();
-
-    final role =
-    (data['role'] ?? '').toString();
-
-    final isTeacher =
-        role == 'teacher';
+    final isOwner = _isOwner();
+    final role = (data['role'] ?? '').toString();
+    final isTeacher = role == 'teacher';
 
     return Container(
-      margin: const EdgeInsets.only(
-        bottom: 12,
-      ),
+      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
@@ -1029,15 +1013,12 @@ class _CommentCard extends StatelessWidget {
         ),
       ),
       child: Row(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           CircleAvatar(
             radius: 19,
             backgroundColor: isTeacher
-                ? Theme.of(context)
-                .colorScheme
-                .primary
+                ? Theme.of(context).colorScheme.primary
                 : Colors.orange.shade100,
             child: Icon(
               isTeacher
@@ -1054,59 +1035,48 @@ class _CommentCard extends StatelessWidget {
 
           Expanded(
             child: Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: Row(
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 7,
+                        runSpacing: 4,
                         children: [
-                          Flexible(
-                            child: Text(
-                              username,
-                              style: const TextStyle(
-                                fontWeight:
-                                FontWeight.w600,
-                              ),
+                          Text(
+                            username,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
 
-                          if (isTeacher) ...[
-                            const SizedBox(width: 7),
+                          if (isTeacher)
                             Container(
-                              padding:
-                              const EdgeInsets
-                                  .symmetric(
+                              padding: const EdgeInsets.symmetric(
                                 horizontal: 7,
                                 vertical: 3,
                               ),
-                              decoration:
-                              BoxDecoration(
+                              decoration: BoxDecoration(
                                 color: Theme.of(context)
                                     .colorScheme
                                     .primary
                                     .withOpacity(0.1),
-                                borderRadius:
-                                BorderRadius
-                                    .circular(6),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 'Guru',
                                 style: TextStyle(
                                   fontSize: 10,
-                                  fontWeight:
-                                  FontWeight.w700,
-                                  color:
-                                  Theme.of(context)
+                                  fontWeight: FontWeight.w700,
+                                  color: Theme.of(context)
                                       .colorScheme
                                       .primary,
                                 ),
                               ),
                             ),
-                          ],
                         ],
                       ),
                     ),
@@ -1114,8 +1084,7 @@ class _CommentCard extends StatelessWidget {
                     if (isOwner)
                       PopupMenuButton<String>(
                         padding: EdgeInsets.zero,
-                        constraints:
-                        const BoxConstraints(),
+                        constraints: const BoxConstraints(),
                         icon: const Icon(
                           Icons.more_vert,
                           size: 20,
@@ -1124,14 +1093,11 @@ class _CommentCard extends StatelessWidget {
                         onSelected: (value) {
                           if (value == 'edit') {
                             onEdit();
-                          }
-
-                          if (value == 'delete') {
+                          } else if (value == 'delete') {
                             onDelete();
                           }
                         },
-                        itemBuilder:
-                            (context) => const [
+                        itemBuilder: (context) => const [
                           PopupMenuItem<String>(
                             value: 'edit',
                             child: Row(
@@ -1179,10 +1145,7 @@ class _CommentCard extends StatelessWidget {
 
                 if (isOwner)
                   Padding(
-                    padding:
-                    const EdgeInsets.only(
-                      top: 2,
-                    ),
+                    padding: const EdgeInsets.only(top: 2),
                     child: Text(
                       '${_formatDate(createdAt)}'
                           '${isEdited ? ' • diedit' : ''}',
@@ -1197,9 +1160,7 @@ class _CommentCard extends StatelessWidget {
 
                 Text(
                   content,
-                  style: const TextStyle(
-                    height: 1.45,
-                  ),
+                  style: const TextStyle(height: 1.45),
                 ),
               ],
             ),

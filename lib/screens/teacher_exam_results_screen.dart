@@ -37,6 +37,7 @@ class TeacherExamResultsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Mencari semua dokumen exam_results yang memiliki examId ini.
     final resultsQuery = FirebaseFirestore.instance
         .collectionGroup('exam_results')
         .where('examId', isEqualTo: examId);
@@ -188,17 +189,18 @@ class TeacherExamResultsScreen extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 16),
+
                     ...results.map((doc) {
                       final data = doc.data();
 
+                      // studentId harus berisi UID Firebase Auth
+                      // jika profil disimpan pada users/{UID}.
                       final studentId =
-                      (data['studentId'] ?? '').toString();
+                      (data['studentId'] ?? '').toString().trim();
 
                       final score = _toInt(data['score']);
-                      final earnedPoints =
-                      _toInt(data['earnedPoints']);
-                      final totalPoints =
-                      _toInt(data['totalPoints']);
+                      final earnedPoints = _toInt(data['earnedPoints']);
+                      final totalPoints = _toInt(data['totalPoints']);
                       final correctAnswers =
                       _toInt(data['correctAnswers']);
                       final totalQuestions =
@@ -206,7 +208,6 @@ class TeacherExamResultsScreen extends StatelessWidget {
 
                       final passed = data['passed'] == true;
 
-                      // Nama cadangan jika profil belum dapat dibaca.
                       final storedName = (
                           data['studentName'] ??
                               data['name'] ??
@@ -219,8 +220,7 @@ class TeacherExamResultsScreen extends StatelessWidget {
                           ? 'Siswa ${studentId.length > 8 ? studentId.substring(0, 8) : studentId}'
                           : 'Siswa tidak diketahui';
 
-                      final color =
-                      passed ? Colors.green : Colors.red;
+                      final color = passed ? Colors.green : Colors.red;
 
                       final rawAnswers = data['answers'];
                       final answers = rawAnswers is Map
@@ -232,8 +232,7 @@ class TeacherExamResultsScreen extends StatelessWidget {
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
@@ -358,7 +357,11 @@ class TeacherExamResultsScreen extends StatelessWidget {
   }
 }
 
-/// Mengambil nama siswa dari users/{studentId}.
+// ================================================================
+// STUDENT NAME
+// Mengambil nama dari users/{studentId}.
+// ================================================================
+
 class StudentNameText extends StatelessWidget {
   final String studentId;
   final String fallbackName;
@@ -397,8 +400,7 @@ class StudentNameText extends StatelessWidget {
                 ''
         ).toString().trim();
 
-        final displayName =
-        name.isNotEmpty ? name : fallbackName;
+        final displayName = name.isNotEmpty ? name : fallbackName;
 
         return Text(
           displayName,
@@ -412,7 +414,10 @@ class StudentNameText extends StatelessWidget {
   }
 }
 
-/// Menampilkan inisial berdasarkan nama dari profil.
+// ================================================================
+// STUDENT INITIAL
+// ================================================================
+
 class StudentInitial extends StatelessWidget {
   final String studentId;
   final String fallbackName;
@@ -426,7 +431,7 @@ class StudentInitial extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (studentId.isEmpty) {
-      return Text(fallbackName.substring(0, 1).toUpperCase());
+      return Text(_getInitial(fallbackName));
     }
 
     return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -435,20 +440,37 @@ class StudentInitial extends StatelessWidget {
           .doc(studentId)
           .get(),
       builder: (context, snapshot) {
-        final profileName =
-        (snapshot.data?.data()?['name'] ?? '')
-            .toString()
-            .trim();
+        final userData = snapshot.data?.data();
+
+        final profileName = (
+            userData?['name'] ??
+                userData?['fullName'] ??
+                userData?['displayName'] ??
+                userData?['nama'] ??
+                ''
+        ).toString().trim();
 
         final name = profileName.isNotEmpty
             ? profileName
             : fallbackName;
 
-        return Text(name.substring(0, 1).toUpperCase());
+        return Text(_getInitial(name));
       },
     );
   }
+
+  String _getInitial(String name) {
+    final trimmed = name.trim();
+
+    if (trimmed.isEmpty) return '?';
+
+    return trimmed.characters.first.toUpperCase();
+  }
 }
+
+// ================================================================
+// SUMMARY CARD
+// ================================================================
 
 class _SummaryCard extends StatelessWidget {
   final String title;
@@ -493,6 +515,10 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
+// ================================================================
+// RESULT INFO
+// ================================================================
+
 class _ResultInfo extends StatelessWidget {
   final String label;
   final String value;
@@ -526,6 +552,10 @@ class _ResultInfo extends StatelessWidget {
   }
 }
 
+// ================================================================
+// STUDENT ANSWERS
+// ================================================================
+
 class TeacherExamAnswerScreen extends StatelessWidget {
   final String studentId;
   final String studentName;
@@ -551,8 +581,6 @@ class TeacherExamAnswerScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Nama juga diambil dari profil agar halaman jawaban
-          // menampilkan nama siswa yang sebenarnya.
           StudentNameText(
             studentId: studentId,
             fallbackName: studentName,

@@ -21,12 +21,6 @@ class TeacherCourseFormScreen extends StatefulWidget {
 
 class _TeacherCourseFormScreenState
     extends State<TeacherCourseFormScreen> {
-  // ============================================================
-  // TEACHER ID STANDAR
-  // ============================================================
-
-  static const String _fixedTeacherId = 'teacher_001';
-
   final _formKey = GlobalKey<FormState>();
 
   final _titleController = TextEditingController();
@@ -34,14 +28,10 @@ class _TeacherCourseFormScreenState
   final _descriptionController = TextEditingController();
   final _imageController = TextEditingController();
   final _lessonsController = TextEditingController();
-
   final _roomController = TextEditingController();
 
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
-
-  final FirebaseAuth _auth =
-      FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   bool _loading = false;
   bool _loadingClasses = true;
@@ -50,10 +40,7 @@ class _TeacherCourseFormScreenState
 
   String? _selectedClassId;
   String? _selectedClassName;
-
-  // ============================================================
-  // DATA JADWAL
-  // ============================================================
+  String? _teacherId;
 
   final List<String> _days = const [
     'Senin',
@@ -65,7 +52,6 @@ class _TeacherCourseFormScreenState
   ];
 
   String? _selectedDay;
-
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
 
@@ -77,60 +63,159 @@ class _TeacherCourseFormScreenState
       _fillExistingData();
     } else {
       _lessonsController.text = '0';
-      _loadTeacherData();
     }
 
-    _loadClasses();
+    _initializeData();
   }
 
   // ============================================================
-  // FILL DATA SAAT EDIT
+  // INISIALISASI DATA
+  // ============================================================
+
+  Future<void> _initializeData() async {
+    await _loadTeacherData();
+    await _loadClasses();
+  }
+
+  // ============================================================
+  // MENGAMBIL ID GURU DARI AKUN LOGIN
+  //
+  // Mendukung:
+  // 1. users/{uid} dengan field teacherId.
+  // 2. users/{uid} dengan field idGuru.
+  // 3. teachers/{teacherId} dengan field uid atau userId.
+  // 4. teachers/{teacherId} dengan field email.
+  //
+  // Tidak membuat ID guru baru di form course.
+  // ============================================================
+
+  Future<String?> _getCurrentTeacherId() async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return null;
+    }
+
+    try {
+      // Cari dokumen user berdasarkan UID Firebase Auth.
+      final userDoc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final userData = userDoc.data();
+
+      if (userData != null) {
+        final savedTeacherId =
+        (userData['teacherId'] ??
+            userData['idGuru'] ??
+            '')
+            .toString()
+            .trim();
+
+        if (savedTeacherId.isNotEmpty) {
+          // Pastikan ID tersebut benar-benar terdaftar.
+          final teacherDoc = await _firestore
+              .collection('teachers')
+              .doc(savedTeacherId)
+              .get();
+
+          if (teacherDoc.exists) {
+            return savedTeacherId;
+          }
+
+          // Jika teacherId disimpan di users tetapi data guru
+          // tidak ada di teachers, jangan menebak ID lain.
+          debugPrint(
+            'Dokumen teachers/$savedTeacherId tidak ditemukan.',
+          );
+        }
+      }
+
+      // Cari dokumen guru berdasarkan UID.
+      final byUid = await _firestore
+          .collection('teachers')
+          .where('uid', isEqualTo: user.uid)
+          .limit(1)
+          .get();
+
+      if (byUid.docs.isNotEmpty) {
+        return byUid.docs.first.id;
+      }
+
+      // Alternatif jika registrasi menyimpan userId.
+      final byUserId = await _firestore
+          .collection('teachers')
+          .where('userId', isEqualTo: user.uid)
+          .limit(1)
+          .get();
+
+      if (byUserId.docs.isNotEmpty) {
+        return byUserId.docs.first.id;
+      }
+
+      // Alternatif jika dokumen guru menggunakan email.
+      final email = user.email?.trim().toLowerCase();
+
+      if (email != null && email.isNotEmpty) {
+        final byEmail = await _firestore
+            .collection('teachers')
+            .where('email', isEqualTo: email)
+            .limit(1)
+            .get();
+
+        if (byEmail.docs.isNotEmpty) {
+          return byEmail.docs.first.id;
+        }
+
+        // Jika email di Firestore disimpan dengan huruf besar,
+        // lakukan pencarian langsung menggunakan email asli.
+        final byOriginalEmail = await _firestore
+            .collection('teachers')
+            .where('email', isEqualTo: user.email)
+            .limit(1)
+            .get();
+
+        if (byOriginalEmail.docs.isNotEmpty) {
+          return byOriginalEmail.docs.first.id;
+        }
+      }
+    } catch (e) {
+      debugPrint('Gagal mengambil ID guru: $e');
+      rethrow;
+    }
+
+    return null;
+  }
+
+  // ============================================================
+  // ISI DATA SAAT EDIT
   // ============================================================
 
   void _fillExistingData() {
-    final data =
-        widget.courseData ?? <String, dynamic>{};
+    final data = widget.courseData ?? <String, dynamic>{};
 
-    _titleController.text =
-        (data['title'] ?? '').toString();
-
+    _titleController.text = (data['title'] ?? '').toString();
     _instructorController.text =
         (data['instructor'] ?? '').toString();
-
     _descriptionController.text =
         (data['description'] ?? '').toString();
+    _imageController.text = (data['image'] ?? '').toString();
+    _lessonsController.text = (data['lessons'] ?? 0).toString();
 
-    _imageController.text =
-        (data['image'] ?? '').toString();
+    final classId = (data['classId'] ?? '').toString().trim();
+    final className = (data['className'] ?? '').toString().trim();
 
-    _lessonsController.text =
-        (data['lessons'] ?? 0).toString();
+    _selectedClassId = classId.isEmpty ? null : classId;
+    _selectedClassName = className.isEmpty ? null : className;
 
-    final classId =
-    (data['classId'] ?? '').toString().trim();
-
-    final className =
-    (data['className'] ?? '').toString().trim();
-
-    _selectedClassId =
-    classId.isEmpty ? null : classId;
-
-    _selectedClassName =
-    className.isEmpty ? null : className;
-
-    // ------------------------------------------------------------
-    // DATA JADWAL
-    // ------------------------------------------------------------
-
-    final day =
-    (data['day'] ?? '').toString().trim();
+    final day = (data['day'] ?? '').toString().trim();
 
     if (day.isNotEmpty && _days.contains(day)) {
       _selectedDay = day;
     }
 
-    _roomController.text =
-        (data['room'] ?? '').toString();
+    _roomController.text = (data['room'] ?? '').toString();
 
     _startTime = _parseTime(
       (data['startTime'] ?? '').toString(),
@@ -139,6 +224,8 @@ class _TeacherCourseFormScreenState
     _endTime = _parseTime(
       (data['endTime'] ?? '').toString(),
     );
+
+    _teacherId = (data['teacherId'] ?? '').toString().trim();
   }
 
   // ============================================================
@@ -146,34 +233,21 @@ class _TeacherCourseFormScreenState
   // ============================================================
 
   TimeOfDay? _parseTime(String value) {
-    if (value.isEmpty) {
-      return null;
-    }
+    if (value.isEmpty) return null;
 
     final parts = value.split(':');
-
-    if (parts.length != 2) {
-      return null;
-    }
+    if (parts.length != 2) return null;
 
     final hour = int.tryParse(parts[0]);
     final minute = int.tryParse(parts[1]);
 
-    if (hour == null || minute == null) {
+    if (hour == null || minute == null) return null;
+
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
       return null;
     }
 
-    if (hour < 0 ||
-        hour > 23 ||
-        minute < 0 ||
-        minute > 59) {
-      return null;
-    }
-
-    return TimeOfDay(
-      hour: hour,
-      minute: minute,
-    );
+    return TimeOfDay(hour: hour, minute: minute);
   }
 
   // ============================================================
@@ -181,15 +255,10 @@ class _TeacherCourseFormScreenState
   // ============================================================
 
   String _formatTime(TimeOfDay? time) {
-    if (time == null) {
-      return '';
-    }
+    if (time == null) return '';
 
-    final hour =
-    time.hour.toString().padLeft(2, '0');
-
-    final minute =
-    time.minute.toString().padLeft(2, '0');
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
 
     return '$hour:$minute';
   }
@@ -202,32 +271,72 @@ class _TeacherCourseFormScreenState
     final user = _auth.currentUser;
 
     if (user == null) {
+      if (mounted) {
+        _showMessage('Silakan login menggunakan akun guru.');
+      }
       return;
     }
 
     try {
-      final doc = await _firestore
+      final teacherId = await _getCurrentTeacherId();
+
+      if (!mounted) return;
+
+      if (teacherId == null || teacherId.isEmpty) {
+        _showMessage(
+          'ID guru tidak ditemukan. Periksa data registrasi guru.',
+        );
+        return;
+      }
+
+      _teacherId = teacherId;
+
+      // Ambil data profil untuk nama instruktur.
+      final userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (!mounted) {
-        return;
+      final userData = userDoc.data();
+
+      String teacherName = '';
+
+      if (userData != null) {
+        teacherName = (userData['name'] ??
+            userData['username'] ??
+            '')
+            .toString()
+            .trim();
       }
 
-      final data = doc.data();
+      // Jika nama tidak tersedia pada users, ambil dari teachers.
+      if (teacherName.isEmpty) {
+        final teacherDoc = await _firestore
+            .collection('teachers')
+            .doc(teacherId)
+            .get();
 
-      if (data != null) {
-        _instructorController.text =
-            (data['name'] ??
-                data['username'] ??
-                '')
-                .toString();
+        final teacherData = teacherDoc.data();
+
+        if (teacherData != null) {
+          teacherName = (teacherData['name'] ??
+              teacherData['teacherName'] ??
+              teacherData['username'] ??
+              '')
+              .toString()
+              .trim();
+        }
+      }
+
+      if (teacherName.isNotEmpty) {
+        _instructorController.text = teacherName;
       }
     } catch (e) {
-      debugPrint(
-        'Gagal mengambil data guru: $e',
-      );
+      debugPrint('Gagal mengambil data guru: $e');
+
+      if (mounted) {
+        _showMessage('Gagal mengambil data guru.');
+      }
     }
   }
 
@@ -241,14 +350,12 @@ class _TeacherCourseFormScreenState
           .collection('classes')
           .get();
 
-      final List<Map<String, dynamic>>
-      loadedClasses = [];
+      final List<Map<String, dynamic>> loadedClasses = [];
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
 
-        final className =
-        (data['name'] ??
+        final className = (data['name'] ??
             data['className'] ??
             data['title'] ??
             doc.id)
@@ -260,26 +367,18 @@ class _TeacherCourseFormScreenState
         });
       }
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
         _classes = loadedClasses;
         _loadingClasses = false;
       });
 
-      // ==========================================================
-      // JIKA EDIT, CARI NAMA KELAS BERDASARKAN ID
-      // ==========================================================
-
-      if (widget.isEdit &&
-          _selectedClassId != null) {
+      if (widget.isEdit && _selectedClassId != null) {
         Map<String, dynamic>? selectedClass;
 
         for (final item in _classes) {
-          if (item['id'].toString() ==
-              _selectedClassId) {
+          if (item['id'].toString() == _selectedClassId) {
             selectedClass = item;
             break;
           }
@@ -287,27 +386,20 @@ class _TeacherCourseFormScreenState
 
         if (selectedClass != null && mounted) {
           setState(() {
-            _selectedClassName =
-                selectedClass!['name'].toString();
+            _selectedClassName = selectedClass!['name'].toString();
           });
         }
       }
     } catch (e) {
-      debugPrint(
-        'Gagal mengambil data kelas: $e',
-      );
+      debugPrint('Gagal mengambil data kelas: $e');
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       setState(() {
         _loadingClasses = false;
       });
 
-      _showMessage(
-        'Gagal mengambil data kelas.',
-      );
+      _showMessage('Gagal mengambil data kelas.');
     }
   }
 
@@ -316,20 +408,13 @@ class _TeacherCourseFormScreenState
   // ============================================================
 
   Future<void> _selectStartTime() async {
-    final selected =
-    await showTimePicker(
+    final selected = await showTimePicker(
       context: context,
-      initialTime:
-      _startTime ??
-          const TimeOfDay(
-            hour: 7,
-            minute: 0,
-          ),
+      initialTime: _startTime ??
+          const TimeOfDay(hour: 7, minute: 0),
     );
 
-    if (selected == null || !mounted) {
-      return;
-    }
+    if (selected == null || !mounted) return;
 
     setState(() {
       _startTime = selected;
@@ -341,20 +426,13 @@ class _TeacherCourseFormScreenState
   // ============================================================
 
   Future<void> _selectEndTime() async {
-    final selected =
-    await showTimePicker(
+    final selected = await showTimePicker(
       context: context,
-      initialTime:
-      _endTime ??
-          const TimeOfDay(
-            hour: 8,
-            minute: 0,
-          ),
+      initialTime: _endTime ??
+          const TimeOfDay(hour: 8, minute: 0),
     );
 
-    if (selected == null || !mounted) {
-      return;
-    }
+    if (selected == null || !mounted) return;
 
     setState(() {
       _endTime = selected;
@@ -366,35 +444,26 @@ class _TeacherCourseFormScreenState
   // ============================================================
 
   bool _validateSchedule() {
-    if (_selectedDay == null ||
-        _selectedDay!.isEmpty) {
-      _showMessage(
-        'Silakan pilih hari jadwal.',
-      );
+    if (_selectedDay == null || _selectedDay!.isEmpty) {
+      _showMessage('Silakan pilih hari jadwal.');
       return false;
     }
 
     if (_startTime == null) {
-      _showMessage(
-        'Silakan pilih jam mulai.',
-      );
+      _showMessage('Silakan pilih jam mulai.');
       return false;
     }
 
     if (_endTime == null) {
-      _showMessage(
-        'Silakan pilih jam selesai.',
-      );
+      _showMessage('Silakan pilih jam selesai.');
       return false;
     }
 
     final startMinutes =
-        _startTime!.hour * 60 +
-            _startTime!.minute;
+        _startTime!.hour * 60 + _startTime!.minute;
 
     final endMinutes =
-        _endTime!.hour * 60 +
-            _endTime!.minute;
+        _endTime!.hour * 60 + _endTime!.minute;
 
     if (endMinutes <= startMinutes) {
       _showMessage(
@@ -404,9 +473,7 @@ class _TeacherCourseFormScreenState
     }
 
     if (_roomController.text.trim().isEmpty) {
-      _showMessage(
-        'Ruangan wajib diisi.',
-      );
+      _showMessage('Ruangan wajib diisi.');
       return false;
     }
 
@@ -414,36 +481,23 @@ class _TeacherCourseFormScreenState
   }
 
   // ============================================================
-  // SAVE COURSE
+  // SIMPAN COURSE
   // ============================================================
 
   Future<void> _saveCourse() async {
-    if (!_formKey.currentState!.validate()) {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedClassId == null || _selectedClassId!.isEmpty) {
+      _showMessage('Silakan pilih kelas terlebih dahulu.');
       return;
     }
 
-    if (_selectedClassId == null ||
-        _selectedClassId!.isEmpty) {
-      _showMessage(
-        'Silakan pilih kelas terlebih dahulu.',
-      );
-      return;
-    }
-
-    // ==========================================================
-    // VALIDASI JADWAL
-    // ==========================================================
-
-    if (!_validateSchedule()) {
-      return;
-    }
+    if (!_validateSchedule()) return;
 
     final user = _auth.currentUser;
 
     if (user == null) {
-      _showMessage(
-        'Akun guru tidak ditemukan.',
-      );
+      _showMessage('Akun guru tidak ditemukan.');
       return;
     }
 
@@ -452,143 +506,86 @@ class _TeacherCourseFormScreenState
     });
 
     try {
-      // ==========================================================
-      // JUMLAH MATERI
-      // ==========================================================
+      // Selalu ambil ID dari akun yang login.
+      // Jangan mengandalkan ID tetap atau nilai dari form edit.
+      final teacherId = await _getCurrentTeacherId();
+
+      if (teacherId == null || teacherId.isEmpty) {
+        throw Exception(
+          'ID guru tidak ditemukan. Periksa data registrasi guru.',
+        );
+      }
+
+      _teacherId = teacherId;
 
       final lessons =
-          int.tryParse(
-            _lessonsController.text.trim(),
-          ) ??
-              0;
-
-      // ==========================================================
-      // CARI KELAS
-      // ==========================================================
+          int.tryParse(_lessonsController.text.trim()) ?? 0;
 
       Map<String, dynamic>? selectedClass;
 
       for (final item in _classes) {
-        if (item['id'].toString() ==
-            _selectedClassId) {
+        if (item['id'].toString() == _selectedClassId) {
           selectedClass = item;
           break;
         }
       }
 
-      // ==========================================================
-      // DATA KELAS
-      // ==========================================================
-
       final classId =
-          selectedClass?['id']?.toString() ??
-              _selectedClassId!;
+          selectedClass?['id']?.toString() ?? _selectedClassId!;
 
       final className =
           selectedClass?['name']?.toString() ??
               _selectedClassName ??
               '';
 
-      // ==========================================================
-      // DATA JADWAL
-      // ==========================================================
-
-      final startTime =
-      _formatTime(_startTime);
-
-      final endTime =
-      _formatTime(_endTime);
-
-      // ==========================================================
-      // DATA COURSE
-      //
-      // Hari, jam dan ruangan disimpan juga di COURSE.
-      // Dengan begitu COURSE menjadi sumber utama jadwal.
-      // ==========================================================
+      final startTime = _formatTime(_startTime);
+      final endTime = _formatTime(_endTime);
 
       final Map<String, dynamic> courseData = {
-        'teacherId': _fixedTeacherId,
-
+        'teacherId': teacherId,
         'classId': classId,
         'className': className,
-
-        'title':
-        _titleController.text.trim(),
-
-        'instructor':
-        _instructorController.text.trim(),
-
-        'image':
-        _imageController.text.trim(),
-
-        'description':
-        _descriptionController.text.trim(),
-
+        'title': _titleController.text.trim(),
+        'instructor': _instructorController.text.trim(),
+        'image': _imageController.text.trim(),
+        'description': _descriptionController.text.trim(),
         'lessons': lessons,
-
-        // ========================================================
-        // DATA JADWAL
-        // ========================================================
-
         'day': _selectedDay,
         'startTime': startTime,
         'endTime': endTime,
-        'room':
-        _roomController.text.trim(),
-
-        'updatedAt':
-        FieldValue.serverTimestamp(),
+        'room': _roomController.text.trim(),
+        'updatedAt': FieldValue.serverTimestamp(),
       };
-
-      // ==========================================================
-      // TAMBAH COURSE
-      // ==========================================================
 
       if (!widget.isEdit) {
         final courseRef = await _firestore
             .collection('courses')
             .add({
           ...courseData,
-          'createdAt':
-          FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
         });
-
-        // ========================================================
-        // OTOMATIS BUAT JADWAL
-        // ========================================================
 
         await _createSchedule(
           courseId: courseRef.id,
           courseData: courseData,
+          teacherId: teacherId,
         );
-      }
-
-      // ==========================================================
-      // UPDATE COURSE
-      // ==========================================================
-
-      else {
+      } else {
         await _firestore
             .collection('courses')
             .doc(widget.courseId)
             .update(courseData);
 
-        // ========================================================
-        // OTOMATIS UPDATE JADWAL
-        // ========================================================
-
         await _syncSchedule(
           courseId: widget.courseId!,
           courseData: courseData,
+          teacherId: teacherId,
         );
       }
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             widget.isEdit
@@ -598,18 +595,11 @@ class _TeacherCourseFormScreenState
         ),
       );
 
-      Navigator.pop(
-        context,
-        true,
-      );
+      Navigator.pop(context, true);
     } catch (e) {
-      debugPrint(
-        'Gagal menyimpan course: $e',
-      );
+      debugPrint('Gagal menyimpan course: $e');
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       _showMessage(
         widget.isEdit
@@ -626,50 +616,28 @@ class _TeacherCourseFormScreenState
   }
 
   // ============================================================
-  // CREATE SCHEDULE OTOMATIS
+  // BUAT JADWAL OTOMATIS
   // ============================================================
 
   Future<void> _createSchedule({
     required String courseId,
     required Map<String, dynamic> courseData,
+    required String teacherId,
   }) async {
     final scheduleData = {
-      'teacherId': _fixedTeacherId,
-
+      'teacherId': teacherId,
       'courseId': courseId,
-
-      'courseName':
-      courseData['title'] ?? '',
-
-      'subject':
-      courseData['title'] ?? '',
-
-      'teacherName':
-      courseData['instructor'] ?? '',
-
-      'classId':
-      courseData['classId'] ?? '',
-
-      'className':
-      courseData['className'] ?? '',
-
-      'day':
-      courseData['day'] ?? '',
-
-      'startTime':
-      courseData['startTime'] ?? '',
-
-      'endTime':
-      courseData['endTime'] ?? '',
-
-      'room':
-      courseData['room'] ?? '',
-
-      'createdAt':
-      FieldValue.serverTimestamp(),
-
-      'updatedAt':
-      FieldValue.serverTimestamp(),
+      'courseName': courseData['title'] ?? '',
+      'subject': courseData['title'] ?? '',
+      'teacherName': courseData['instructor'] ?? '',
+      'classId': courseData['classId'] ?? '',
+      'className': courseData['className'] ?? '',
+      'day': courseData['day'] ?? '',
+      'startTime': courseData['startTime'] ?? '',
+      'endTime': courseData['endTime'] ?? '',
+      'room': courseData['room'] ?? '',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     };
 
     await _firestore
@@ -678,89 +646,47 @@ class _TeacherCourseFormScreenState
   }
 
   // ============================================================
-  // SYNC SCHEDULE SAAT COURSE DIEDIT
+  // SINKRONISASI JADWAL SAAT COURSE DIEDIT
   // ============================================================
 
   Future<void> _syncSchedule({
     required String courseId,
     required Map<String, dynamic> courseData,
+    required String teacherId,
   }) async {
     final snapshot = await _firestore
         .collection('schedules')
-        .where(
-      'courseId',
-      isEqualTo: courseId,
-    )
+        .where('courseId', isEqualTo: courseId)
         .get();
 
-    // ==========================================================
-    // DATA YANG HARUS SAMA DENGAN COURSE
-    // ==========================================================
-
     final scheduleData = {
-      'teacherId': _fixedTeacherId,
-
+      'teacherId': teacherId,
       'courseId': courseId,
-
-      'courseName':
-      courseData['title'] ?? '',
-
-      'subject':
-      courseData['title'] ?? '',
-
-      'teacherName':
-      courseData['instructor'] ?? '',
-
-      'classId':
-      courseData['classId'] ?? '',
-
-      'className':
-      courseData['className'] ?? '',
-
-      'day':
-      courseData['day'] ?? '',
-
-      'startTime':
-      courseData['startTime'] ?? '',
-
-      'endTime':
-      courseData['endTime'] ?? '',
-
-      'room':
-      courseData['room'] ?? '',
-
-      'updatedAt':
-      FieldValue.serverTimestamp(),
+      'courseName': courseData['title'] ?? '',
+      'subject': courseData['title'] ?? '',
+      'teacherName': courseData['instructor'] ?? '',
+      'classId': courseData['classId'] ?? '',
+      'className': courseData['className'] ?? '',
+      'day': courseData['day'] ?? '',
+      'startTime': courseData['startTime'] ?? '',
+      'endTime': courseData['endTime'] ?? '',
+      'room': courseData['room'] ?? '',
+      'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    // ==========================================================
-    // JIKA SUDAH ADA JADWAL
-    // UPDATE SEMUA JADWAL TERKAIT COURSE
-    // ==========================================================
-
     if (snapshot.docs.isNotEmpty) {
-      final batch =
-      _firestore.batch();
+      final batch = _firestore.batch();
 
       for (final doc in snapshot.docs) {
-        batch.update(
-          doc.reference,
-          scheduleData,
-        );
+        batch.update(doc.reference, scheduleData);
       }
 
       await batch.commit();
-    }
-
-    // ==========================================================
-    // JIKA BELUM ADA JADWAL
-    // BUAT JADWAL BARU
-    // ==========================================================
-
-    else {
+    } else {
       await _createSchedule(
         courseId: courseId,
         courseData: courseData,
+        teacherId: teacherId,
       );
     }
   }
@@ -769,18 +695,11 @@ class _TeacherCourseFormScreenState
   // MESSAGE
   // ============================================================
 
-  void _showMessage(
-      String message,
-      ) {
-    if (!mounted) {
-      return;
-    }
+  void _showMessage(String message) {
+    if (!mounted) return;
 
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
-      SnackBar(
-        content: Text(message),
-      ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
     );
   }
 
@@ -793,38 +712,27 @@ class _TeacherCourseFormScreenState
     required IconData icon,
     String? hint,
   }) {
-    final theme =
-    Theme.of(context);
+    final theme = Theme.of(context);
 
     return InputDecoration(
       labelText: label,
       hintText: hint,
       prefixIcon: Icon(icon),
       filled: true,
-      fillColor: theme
-          .colorScheme
-          .surfaceContainerHighest
+      fillColor: theme.colorScheme.surfaceContainerHighest
           .withOpacity(0.35),
       border: OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(14),
-        borderSide:
-        BorderSide.none,
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
       ),
-      enabledBorder:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(14),
-        borderSide:
-        BorderSide.none,
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
       ),
-      focusedBorder:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(14),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
-          color:
-          theme.colorScheme.primary,
+          color: theme.colorScheme.primary,
           width: 1.5,
         ),
       ),
@@ -835,46 +743,31 @@ class _TeacherCourseFormScreenState
     required String label,
     required IconData icon,
   }) {
-    final theme =
-    Theme.of(context);
+    final theme = Theme.of(context);
 
     return InputDecoration(
       labelText: label,
       prefixIcon: Icon(icon),
       filled: true,
-      fillColor: theme
-          .colorScheme
-          .surfaceContainerHighest
+      fillColor: theme.colorScheme.surfaceContainerHighest
           .withOpacity(0.35),
       border: OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(14),
-        borderSide:
-        BorderSide.none,
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
       ),
-      enabledBorder:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(14),
-        borderSide:
-        BorderSide.none,
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
       ),
-      focusedBorder:
-      OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(14),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
-          color:
-          theme.colorScheme.primary,
+          color: theme.colorScheme.primary,
           width: 1.5,
         ),
       ),
     );
   }
-
-  // ============================================================
-  // TIME FIELD DECORATION
-  // ============================================================
 
   InputDecoration _timeDecoration({
     required String label,
@@ -909,560 +802,323 @@ class _TeacherCourseFormScreenState
 
   @override
   Widget build(BuildContext context) {
-    final theme =
-    Theme.of(context);
+    final theme = Theme.of(context);
 
     String? dropdownClassValue;
 
     if (_selectedClassId != null &&
         _classes.any(
-              (item) =>
-          item['id'].toString() ==
-              _selectedClassId,
+              (item) => item['id'].toString() == _selectedClassId,
         )) {
-      dropdownClassValue =
-          _selectedClassId;
+      dropdownClassValue = _selectedClassId;
     }
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isEdit
-              ? 'Edit Course'
-              : 'Tambah Course',
+          widget.isEdit ? 'Edit Course' : 'Tambah Course',
         ),
       ),
       body: SafeArea(
         child: Form(
           key: _formKey,
           child: ListView(
-            padding:
-            const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
             children: [
               Text(
-                widget.isEdit
-                    ? 'Edit Course'
-                    : 'Buat Course Baru',
-                style: theme
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(
-                  fontWeight:
-                  FontWeight.bold,
+                widget.isEdit ? 'Edit Course' : 'Buat Course Baru',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-
               const SizedBox(height: 8),
-
               Text(
                 widget.isEdit
                     ? 'Perbarui informasi course Anda.'
                     : 'Lengkapi informasi course yang akan diberikan kepada siswa.',
-                style: theme
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(
-                  color: theme
-                      .colorScheme
-                      .onSurfaceVariant,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-
               const SizedBox(height: 24),
 
-              // ==================================================
               // JUDUL COURSE
-              // ==================================================
-
               TextFormField(
-                controller:
-                _titleController,
-                textInputAction:
-                TextInputAction.next,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Judul Course',
-                  hint:
-                  'Contoh: Pemrograman Flutter',
-                  icon: Icons
-                      .menu_book_outlined,
+                controller: _titleController,
+                textInputAction: TextInputAction.next,
+                decoration: _inputDecoration(
+                  label: 'Judul Course',
+                  hint: 'Contoh: Pemrograman Flutter',
+                  icon: Icons.menu_book_outlined,
                 ),
                 validator: (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Judul course wajib diisi';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // INSTRUKTUR
-              // ==================================================
-
               TextFormField(
-                controller:
-                _instructorController,
-                textInputAction:
-                TextInputAction.next,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Nama Instruktur',
+                controller: _instructorController,
+                textInputAction: TextInputAction.next,
+                decoration: _inputDecoration(
+                  label: 'Nama Instruktur',
                   hint: 'Nama guru',
-                  icon:
-                  Icons.person_outline,
+                  icon: Icons.person_outline,
                 ),
                 validator: (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Nama instruktur wajib diisi';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // KELAS
-              // ==================================================
-
               if (_loadingClasses)
                 Container(
                   height: 56,
-                  alignment:
-                  Alignment.center,
-                  decoration:
-                  BoxDecoration(
-                    color: theme
-                        .colorScheme
-                        .surfaceContainerHighest
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest
                         .withOpacity(0.35),
-                    borderRadius:
-                    BorderRadius
-                        .circular(
-                      14,
-                    ),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  child:
-                  const SizedBox(
+                  child: const SizedBox(
                     width: 22,
                     height: 22,
-                    child:
-                    CircularProgressIndicator(
-                      strokeWidth: 2,
-                    ),
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                 )
               else
-                DropdownButtonFormField<
-                    String>(
-                  initialValue:
-                  dropdownClassValue,
-                  decoration:
-                  _dropdownDecoration(
+                DropdownButtonFormField<String>(
+                  initialValue: dropdownClassValue,
+                  decoration: _dropdownDecoration(
                     label: 'Kelas',
-                    icon: Icons
-                        .groups_outlined,
+                    icon: Icons.groups_outlined,
                   ),
-                  hint: const Text(
-                    'Pilih kelas',
-                  ),
-                  items:
-                  _classes.map(
-                        (classData) {
-                      return DropdownMenuItem<
-                          String>(
-                        value:
-                        classData['id']
-                            .toString(),
-                        child: Text(
-                          classData['name']
-                              .toString(),
-                        ),
-                      );
-                    },
-                  ).toList(),
-                  onChanged:
-                  _loading
+                  hint: const Text('Pilih kelas'),
+                  items: _classes.map((classData) {
+                    return DropdownMenuItem<String>(
+                      value: classData['id'].toString(),
+                      child: Text(classData['name'].toString()),
+                    );
+                  }).toList(),
+                  onChanged: _loading
                       ? null
                       : (value) {
-                    if (value ==
-                        null) {
-                      return;
-                    }
+                    if (value == null) return;
 
-                    Map<String,
-                        dynamic>?
-                    selected;
+                    Map<String, dynamic>? selected;
 
-                    for (final item
-                    in _classes) {
-                      if (item['id']
-                          .toString() ==
-                          value) {
-                        selected =
-                            item;
+                    for (final item in _classes) {
+                      if (item['id'].toString() == value) {
+                        selected = item;
                         break;
                       }
                     }
 
                     setState(() {
-                      _selectedClassId =
-                          value;
-
+                      _selectedClassId = value;
                       _selectedClassName =
-                          selected?[
-                          'name']
-                              ?.toString() ??
-                              '';
+                          selected?['name']?.toString() ?? '';
                     });
                   },
                   validator: (value) {
-                    if (value == null ||
-                        value.isEmpty) {
+                    if (value == null || value.isEmpty) {
                       return 'Kelas wajib dipilih';
                     }
-
                     return null;
                   },
                 ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // GAMBAR
-              // ==================================================
-
               TextFormField(
-                controller:
-                _imageController,
-                textInputAction:
-                TextInputAction.next,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Path Gambar',
-                  hint:
-                  'Contoh: assets/images/flutter.png',
-                  icon:
-                  Icons.image_outlined,
+                controller: _imageController,
+                textInputAction: TextInputAction.next,
+                decoration: _inputDecoration(
+                  label: 'Path Gambar',
+                  hint: 'Contoh: assets/images/flutter.png',
+                  icon: Icons.image_outlined,
                 ),
                 validator: (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Path gambar wajib diisi';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // JUMLAH MATERI
-              // ==================================================
-
               TextFormField(
-                controller:
-                _lessonsController,
-                keyboardType:
-                TextInputType.number,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Jumlah Materi',
-                  hint:
-                  'Contoh: 10',
-                  icon: Icons
-                      .library_books_outlined,
+                controller: _lessonsController,
+                keyboardType: TextInputType.number,
+                decoration: _inputDecoration(
+                  label: 'Jumlah Materi',
+                  hint: 'Contoh: 10',
+                  icon: Icons.library_books_outlined,
                 ),
                 validator: (value) {
-                  final number =
-                  int.tryParse(
-                    value?.trim() ?? '',
-                  );
+                  final number = int.tryParse(value?.trim() ?? '');
 
-                  if (number == null ||
-                      number < 0) {
+                  if (number == null || number < 0) {
                     return 'Masukkan jumlah materi yang valid';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // DESKRIPSI
-              // ==================================================
-
               TextFormField(
-                controller:
-                _descriptionController,
+                controller: _descriptionController,
                 maxLines: 5,
-                decoration:
-                _inputDecoration(
-                  label:
-                  'Deskripsi Course',
-                  hint:
-                  'Jelaskan materi yang akan dipelajari...',
-                  icon: Icons
-                      .description_outlined,
+                decoration: _inputDecoration(
+                  label: 'Deskripsi Course',
+                  hint: 'Jelaskan materi yang akan dipelajari...',
+                  icon: Icons.description_outlined,
                 ),
                 validator: (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Deskripsi course wajib diisi';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 28),
 
-              // ==================================================
-              // PEMISAH JADWAL
-              // ==================================================
-
+              // JADWAL COURSE
               Text(
                 'Jadwal Course',
-                style: theme
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(
-                  fontWeight:
-                  FontWeight.bold,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-
               const SizedBox(height: 6),
-
               Text(
                 'Jadwal ini akan otomatis digunakan pada Jadwal Mengajar.',
-                style: theme
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(
-                  color: theme
-                      .colorScheme
-                      .onSurfaceVariant,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // HARI
-              // ==================================================
-
-              DropdownButtonFormField<
-                  String>(
-                initialValue:
-                _selectedDay,
-                decoration:
-                _dropdownDecoration(
+              DropdownButtonFormField<String>(
+                initialValue: _selectedDay,
+                decoration: _dropdownDecoration(
                   label: 'Hari',
-                  icon: Icons
-                      .calendar_today_outlined,
+                  icon: Icons.calendar_today_outlined,
                 ),
-                hint: const Text(
-                  'Pilih hari',
-                ),
-                items:
-                _days.map(
-                      (day) {
-                    return DropdownMenuItem<
-                        String>(
-                      value: day,
-                      child:
-                      Text(day),
-                    );
-                  },
-                ).toList(),
-                onChanged:
-                _loading
+                hint: const Text('Pilih hari'),
+                items: _days.map((day) {
+                  return DropdownMenuItem<String>(
+                    value: day,
+                    child: Text(day),
+                  );
+                }).toList(),
+                onChanged: _loading
                     ? null
                     : (value) {
                   setState(() {
-                    _selectedDay =
-                        value;
+                    _selectedDay = value;
                   });
                 },
                 validator: (value) {
-                  if (value == null ||
-                      value.isEmpty) {
+                  if (value == null || value.isEmpty) {
                     return 'Hari wajib dipilih';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // JAM MULAI
-              // ==================================================
-
               InkWell(
-                onTap:
-                _loading
-                    ? null
-                    : _selectStartTime,
-                borderRadius:
-                BorderRadius.circular(
-                  14,
-                ),
-                child:
-                InputDecorator(
-                  decoration:
-                  _timeDecoration(
-                    label:
-                    'Jam Mulai',
-                    icon: Icons
-                        .access_time_outlined,
+                onTap: _loading ? null : _selectStartTime,
+                borderRadius: BorderRadius.circular(14),
+                child: InputDecorator(
+                  decoration: _timeDecoration(
+                    label: 'Jam Mulai',
+                    icon: Icons.access_time_outlined,
                   ),
                   child: Text(
                     _startTime == null
                         ? 'Pilih waktu'
-                        : _formatTime(
-                      _startTime,
-                    ),
+                        : _formatTime(_startTime),
                     style: TextStyle(
-                      color:
-                      _startTime ==
-                          null
-                          ? theme
-                          .colorScheme
-                          .onSurfaceVariant
-                          : theme
-                          .colorScheme
-                          .onSurface,
+                      color: _startTime == null
+                          ? theme.colorScheme.onSurfaceVariant
+                          : theme.colorScheme.onSurface,
                     ),
                   ),
                 ),
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // JAM SELESAI
-              // ==================================================
-
               InkWell(
-                onTap:
-                _loading
-                    ? null
-                    : _selectEndTime,
-                borderRadius:
-                BorderRadius.circular(
-                  14,
-                ),
-                child:
-                InputDecorator(
-                  decoration:
-                  _timeDecoration(
-                    label:
-                    'Jam Selesai',
-                    icon: Icons
-                        .access_time_filled_outlined,
+                onTap: _loading ? null : _selectEndTime,
+                borderRadius: BorderRadius.circular(14),
+                child: InputDecorator(
+                  decoration: _timeDecoration(
+                    label: 'Jam Selesai',
+                    icon: Icons.access_time_filled_outlined,
                   ),
                   child: Text(
                     _endTime == null
                         ? 'Pilih waktu'
-                        : _formatTime(
-                      _endTime,
-                    ),
+                        : _formatTime(_endTime),
                     style: TextStyle(
-                      color:
-                      _endTime ==
-                          null
-                          ? theme
-                          .colorScheme
-                          .onSurfaceVariant
-                          : theme
-                          .colorScheme
-                          .onSurface,
+                      color: _endTime == null
+                          ? theme.colorScheme.onSurfaceVariant
+                          : theme.colorScheme.onSurface,
                     ),
                   ),
                 ),
               ),
-
               const SizedBox(height: 16),
 
-              // ==================================================
               // RUANGAN
-              // ==================================================
-
               TextFormField(
-                controller:
-                _roomController,
-                textInputAction:
-                TextInputAction.done,
-                decoration:
-                _inputDecoration(
+                controller: _roomController,
+                textInputAction: TextInputAction.done,
+                decoration: _inputDecoration(
                   label: 'Ruangan',
-                  hint:
-                  'Contoh: Lab RPL',
-                  icon: Icons
-                      .meeting_room_outlined,
+                  hint: 'Contoh: Lab RPL',
+                  icon: Icons.meeting_room_outlined,
                 ),
                 validator: (value) {
-                  if (value == null ||
-                      value
-                          .trim()
-                          .isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Ruangan wajib diisi';
                   }
-
                   return null;
                 },
               ),
-
               const SizedBox(height: 28),
 
-              // ==================================================
               // SIMPAN
-              // ==================================================
-
               SizedBox(
                 height: 52,
-                child:
-                FilledButton.icon(
-                  onPressed: _loading
-                      ? null
-                      : _saveCourse,
+                child: FilledButton.icon(
+                  onPressed: _loading ? null : _saveCourse,
                   icon: _loading
                       ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child:
-                    CircularProgressIndicator(
+                    child: CircularProgressIndicator(
                       strokeWidth: 2,
                     ),
                   )
                       : Icon(
                     widget.isEdit
-                        ? Icons
-                        .save_outlined
+                        ? Icons.save_outlined
                         : Icons.add,
                   ),
                   label: Text(
@@ -1474,30 +1130,20 @@ class _TeacherCourseFormScreenState
                   ),
                 ),
               ),
-
               const SizedBox(height: 12),
 
-              // ==================================================
               // BATAL
-              // ==================================================
-
               SizedBox(
                 height: 52,
-                child:
-                OutlinedButton(
+                child: OutlinedButton(
                   onPressed: _loading
                       ? null
                       : () {
-                    Navigator.pop(
-                      context,
-                    );
+                    Navigator.pop(context);
                   },
-                  child: const Text(
-                    'Batal',
-                  ),
+                  child: const Text('Batal'),
                 ),
               ),
-
               const SizedBox(height: 20),
             ],
           ),

@@ -37,19 +37,46 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // TEACHER ID UTAMA
   // ============================================================
 
-  static const String _teacherId = 'teacher_001';
 
-  @override
-  void initState() {
-    super.initState();
+  // ============================================================
+  // TEACHER ID UTAMA
+  // ============================================================
 
-    _initializeTeacherData();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _showTeacherWelcomeDialog();
-    });
+
+  String get _authUid => _auth.currentUser?.uid ?? '';
+
+  String get _teacherId {
+    final id = _teacherData?['teacherId'] ??
+        _teacherData?['teacherDocId'] ??
+        _teacherData?['idGuru'];
+
+    return id?.toString().trim() ?? '';
   }
+
+
+
+  String get _teacherName {
+    final name = _teacherData?['username'] ??
+        _teacherData?['name'] ??
+        _teacherData?['displayName'];
+
+    final value = name?.toString().trim() ?? '';
+
+    return value.isNotEmpty ? value : 'Guru';
+  }
+
+
+  bool get _isTeacherLoggedIn => _authUid.isNotEmpty;
+
+
+  bool _requireTeacherLogin() {
+    if (_isTeacherLoggedIn) return true;
+
+    _showMessage('Silakan login terlebih dahulu.');
+    return false;
+  }
+
 
   // ============================================================
   // INITIALIZE
@@ -67,10 +94,18 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // WELCOME
   // ============================================================
 
-  void _showTeacherWelcomeDialog() {
-    if (!mounted) return;
 
-    showDialog(
+  @override
+  void initState() {
+    super.initState();
+    _initializeTeacherData();
+  }
+
+
+  void _showTeacherWelcomeDialog() {
+    if (!mounted || _auth.currentUser == null) return;
+
+    showDialog<void>(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
@@ -86,16 +121,9 @@ class _TeacherScreenState extends State<TeacherScreen> {
             borderRadius: BorderRadius.circular(28),
           ),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 520,
-            ),
+            constraints: const BoxConstraints(maxWidth: 520),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                24,
-                12,
-                24,
-                24,
-              ),
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -103,12 +131,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
                     alignment: Alignment.topRight,
                     child: IconButton(
                       tooltip: 'Tutup',
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop();
-                      },
-                      icon: const Icon(
-                        Icons.close_rounded,
-                      ),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: const Icon(Icons.close_rounded),
                     ),
                   ),
                   Container(
@@ -144,9 +168,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
                   const SizedBox(height: 14),
                   Text(
                     'Melalui dashboard ini Anda dapat mengelola '
-                        'course, materi, quiz, tugas, jadwal, '
-                        'presensi, ujian, pengumuman, dan aktivitas '
-                        'pembelajaran siswa.',
+                        'course, materi, quiz, tugas, jadwal, presensi, '
+                        'ujian, pengumuman, dan aktivitas pembelajaran siswa.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: colorScheme.onSurfaceVariant,
@@ -157,12 +180,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop();
-                      },
-                      icon: const Icon(
-                        Icons.dashboard_rounded,
-                      ),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: const Icon(Icons.dashboard_rounded),
                       label: const Text('Mulai'),
                     ),
                   ),
@@ -179,55 +198,68 @@ class _TeacherScreenState extends State<TeacherScreen> {
   // LOAD PROFILE
   // ============================================================
 
+
   Future<void> _loadTeacherProfile() async {
     final user = _auth.currentUser;
 
     if (user == null) {
       if (!mounted) return;
-
       setState(() {
+        _teacherData = null;
         _loadingProfile = false;
       });
-
       return;
     }
 
     try {
-      final doc = await _firestore
+      // Cari berdasarkan UID terlebih dahulu.
+      final userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (!mounted) return;
+      Map<String, dynamic>? profileData;
 
+      if (userDoc.exists) {
+        profileData = userDoc.data();
+      } else {
+        // Jika ID dokumen bukan UID, cari berdasarkan email.
+        final query = await _firestore
+            .collection('users')
+            .where('email', isEqualTo: user.email)
+            .limit(1)
+            .get();
+
+        if (query.docs.isNotEmpty) {
+          profileData = query.docs.first.data();
+        }
+      }
+
+      debugPrint('========== PROFIL GURU ==========');
+      debugPrint('Auth UID       : ${user.uid}');
+      debugPrint('Email login    : ${user.email}');
+      debugPrint('Dokumen UID    : ${userDoc.exists}');
+      debugPrint('ID Teacher     : ${profileData?['teacherId']}');
+      debugPrint('Nama guru      : ${profileData?['username']}');
+      debugPrint('Data lengkap   : $profileData');
+      debugPrint('=================================');
+
+
+
+      if (!mounted) return;
       setState(() {
-        _teacherData = doc.data();
+        _teacherData = profileData;
         _loadingProfile = false;
       });
     } catch (e) {
-      debugPrint('Gagal mengambil profile guru: $e');
+      debugPrint('Gagal memuat profil guru: $e');
 
       if (!mounted) return;
-
       setState(() {
+        _teacherData = null;
         _loadingProfile = false;
       });
     }
-  }
-
-  // ============================================================
-  // DATA GURU
-  // ============================================================
-
-  String get _teacherName {
-    final name = (
-        _teacherData?['name'] ??
-            _teacherData?['username'] ??
-            _teacherData?['displayName'] ??
-            'Guru'
-    ).toString().trim();
-
-    return name.isEmpty ? 'Guru' : name;
   }
 
   // ============================================================
@@ -328,6 +360,8 @@ class _TeacherScreenState extends State<TeacherScreen> {
       String courseId,
       String courseTitle,
       ) async {
+    if (!_requireTeacherLogin()) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
@@ -335,21 +369,16 @@ class _TeacherScreenState extends State<TeacherScreen> {
           title: const Text('Hapus Course?'),
           content: Text(
             'Course "$courseTitle" akan dihapus secara permanen.\n\n'
-                'Jadwal mengajar yang terkait dengan course ini juga akan '
-                'dihapus.\n\n'
+                'Jadwal mengajar terkait juga akan dihapus.\n\n'
                 'Tindakan ini tidak dapat dibatalkan.',
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false);
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('Batal'),
             ),
             FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true);
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('Hapus'),
             ),
           ],
@@ -357,64 +386,51 @@ class _TeacherScreenState extends State<TeacherScreen> {
       },
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     try {
-      // ========================================================
-      // CARI SCHEDULE YANG TERHUBUNG DENGAN COURSE
-      // ========================================================
+      final courseRef = _firestore.collection('courses').doc(courseId);
+      final courseDoc = await courseRef.get();
+
+      if (!courseDoc.exists) {
+        _showMessage('Course tidak ditemukan.');
+        return;
+      }
+
+      final courseData = courseDoc.data();
+
+      if (courseData == null ||
+          courseData['teacherId'] != _teacherId) {
+        _showMessage('Anda tidak memiliki akses untuk menghapus course ini.');
+        return;
+      }
 
       final scheduleSnapshot = await _firestore
           .collection('schedules')
-          .where(
-        'courseId',
-        isEqualTo: courseId,
-      )
+          .where('courseId', isEqualTo: courseId)
+          .where('teacherId', isEqualTo: _teacherId)
           .get();
-
-      // ========================================================
-      // BATCH DELETE
-      // ========================================================
 
       final batch = _firestore.batch();
 
-      // Hapus semua schedule yang memiliki courseId ini
       for (final scheduleDoc in scheduleSnapshot.docs) {
         batch.delete(scheduleDoc.reference);
       }
 
-      // Hapus course
-      batch.delete(
-        _firestore
-            .collection('courses')
-            .doc(courseId),
-      );
+      batch.delete(courseRef);
 
-      // Jalankan semua penghapusan
       await batch.commit();
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            scheduleSnapshot.docs.isEmpty
-                ? 'Course berhasil dihapus.'
-                : 'Course dan ${scheduleSnapshot.docs.length} '
-                'jadwal terkait berhasil dihapus.',
-          ),
-        ),
+      _showMessage(
+        scheduleSnapshot.docs.isEmpty
+            ? 'Course berhasil dihapus.'
+            : 'Course dan ${scheduleSnapshot.docs.length} jadwal terkait berhasil dihapus.',
       );
     } catch (e) {
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal menghapus course: $e',
-          ),
-        ),
-      );
+      _showMessage('Gagal menghapus course: $e');
     }
   }
 
@@ -1730,13 +1746,10 @@ class _TeacherScreenState extends State<TeacherScreen> {
           Card(
             child: Column(
               children: [
-                const ListTile(
-                  leading:
-                  Icon(Icons.badge_outlined),
-                  title:
-                  Text('Teacher ID'),
-                  subtitle:
-                  Text(_teacherId),
+                ListTile(
+                  leading: const Icon(Icons.badge_outlined),
+                  title: const Text('Teacher ID'),
+                  subtitle: Text(_teacherId.isEmpty ? '-' : _teacherId),
                 ),
                 const Divider(height: 1),
                 ListTile(

@@ -23,16 +23,54 @@ class _TeacherExamDeleteScreenState
 
   bool _deleting = false;
 
+  // ============================================================
+  // DELETE EXAM
+  // ============================================================
+
   Future<void> _deleteExam() async {
+    if (_deleting) return;
+
     setState(() {
       _deleting = true;
     });
 
     try {
-      await _firestore
+      final examRef = _firestore
           .collection('exams')
-          .doc(widget.examId)
-          .delete();
+          .doc(widget.examId);
+
+      // Pastikan dokumen ujian masih tersedia.
+      final examSnapshot = await examRef.get();
+
+      if (!examSnapshot.exists) {
+        throw Exception('Data ujian tidak ditemukan.');
+      }
+
+      // ========================================================
+      // AMBIL SOAL BERDASARKAN EXAM ID
+      // ========================================================
+
+      final questionsSnapshot = await _firestore
+          .collection('exam_questions')
+          .where(
+        'examId',
+        isEqualTo: widget.examId,
+      )
+          .get();
+
+      // ========================================================
+      // HAPUS SOAL DAN DOKUMEN UJIAN DALAM BATCH
+      // ========================================================
+
+      final batch = _firestore.batch();
+
+      for (final question in questionsSnapshot.docs) {
+        batch.delete(question.reference);
+      }
+
+      batch.delete(examRef);
+
+      await batch.commit();
 
       if (!mounted) return;
 
@@ -49,10 +87,15 @@ class _TeacherExamDeleteScreenState
           content: Text(
             'Gagal menghapus ujian:\n$e',
           ),
+          duration: const Duration(seconds: 5),
         ),
       );
     }
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -66,24 +109,19 @@ class _TeacherExamDeleteScreenState
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisAlignment:
-            MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
                 width: 90,
                 height: 90,
                 decoration: BoxDecoration(
-                  color: theme
-                      .colorScheme
-                      .errorContainer,
+                  color: theme.colorScheme.errorContainer,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.delete_outline,
                   size: 46,
-                  color: theme
-                      .colorScheme
-                      .onErrorContainer,
+                  color: theme.colorScheme.onErrorContainer,
                 ),
               ),
 
@@ -92,10 +130,7 @@ class _TeacherExamDeleteScreenState
               Text(
                 'Hapus Ujian?',
                 textAlign: TextAlign.center,
-                style: theme
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(
+                style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -105,10 +140,7 @@ class _TeacherExamDeleteScreenState
               Text(
                 widget.title,
                 textAlign: TextAlign.center,
-                style: theme
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(
+                style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -116,12 +148,11 @@ class _TeacherExamDeleteScreenState
               const SizedBox(height: 16),
 
               Text(
-                'Ujian ini akan dihapus secara permanen. '
-                    'Pastikan Anda benar-benar ingin menghapus '
-                    'ujian tersebut.',
+                'Ujian ini beserta seluruh soal yang terkait '
+                    'akan dihapus secara permanen. '
+                    'Pastikan Anda benar-benar ingin melanjutkan.',
                 textAlign: TextAlign.center,
-                style:
-                theme.textTheme.bodyMedium,
+                style: theme.textTheme.bodyMedium,
               ),
 
               const SizedBox(height: 32),
@@ -131,26 +162,19 @@ class _TeacherExamDeleteScreenState
                 height: 52,
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor:
-                    theme.colorScheme.error,
-                    foregroundColor:
-                    theme.colorScheme.onError,
+                    backgroundColor: theme.colorScheme.error,
+                    foregroundColor: theme.colorScheme.onError,
                   ),
-                  onPressed: _deleting
-                      ? null
-                      : _deleteExam,
+                  onPressed: _deleting ? null : _deleteExam,
                   icon: _deleting
                       ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child:
-                    CircularProgressIndicator(
+                    child: CircularProgressIndicator(
                       strokeWidth: 2,
                     ),
                   )
-                      : const Icon(
-                    Icons.delete_outline,
-                  ),
+                      : const Icon(Icons.delete_outline),
                   label: Text(
                     _deleting
                         ? 'Menghapus...'
@@ -168,14 +192,9 @@ class _TeacherExamDeleteScreenState
                   onPressed: _deleting
                       ? null
                       : () {
-                    Navigator.pop(
-                      context,
-                      false,
-                    );
+                    Navigator.pop(context, false);
                   },
-                  child: const Text(
-                    'Batal',
-                  ),
+                  child: const Text('Batal'),
                 ),
               ),
             ],

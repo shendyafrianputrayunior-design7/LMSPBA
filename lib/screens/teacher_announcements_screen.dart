@@ -40,23 +40,33 @@ class _TeacherAnnouncementsScreenState
     }
 
     try {
-      // ========================================================
-      // 1. CEK users/{uid}.teacherId
-      // ========================================================
-
-      final userDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final userDoc =
+      await _firestore.collection('users').doc(user.uid).get();
 
       final userData = userDoc.data();
 
+      // 1. Prioritaskan teacherDocId.
+      final savedTeacherDocId =
+      userData?['teacherDocId']?.toString().trim();
+
+      if (savedTeacherDocId != null &&
+          savedTeacherDocId.isNotEmpty) {
+        final teacherDoc = await _firestore
+            .collection('teachers')
+            .doc(savedTeacherDocId)
+            .get();
+
+        if (teacherDoc.exists) {
+          return savedTeacherDocId;
+        }
+      }
+
+      // 2. Fallback untuk data lama yang memakai teacherId.
       final savedTeacherId =
       userData?['teacherId']?.toString().trim();
 
       if (savedTeacherId != null &&
           savedTeacherId.isNotEmpty) {
-        // Pastikan document teachers memang ada.
         final teacherDoc = await _firestore
             .collection('teachers')
             .doc(savedTeacherId)
@@ -67,28 +77,33 @@ class _TeacherAnnouncementsScreenState
         }
       }
 
-      // ========================================================
-      // 2. FALLBACK BERDASARKAN EMAIL
-      // ========================================================
+      // 3. Fallback berdasarkan UID.
+      final uidQuery = await _firestore
+          .collection('teachers')
+          .where('uid', isEqualTo: user.uid)
+          .limit(1)
+          .get();
 
+      if (uidQuery.docs.isNotEmpty) {
+        return uidQuery.docs.first.id;
+      }
+
+      // 4. Fallback berdasarkan email.
       final email = user.email?.trim();
 
       if (email != null && email.isNotEmpty) {
-        final teacherQuery = await _firestore
+        final emailQuery = await _firestore
             .collection('teachers')
-            .where(
-          'email',
-          isEqualTo: email,
-        )
+            .where('email', isEqualTo: email)
             .limit(1)
             .get();
 
-        if (teacherQuery.docs.isNotEmpty) {
-          return teacherQuery.docs.first.id;
+        if (emailQuery.docs.isNotEmpty) {
+          return emailQuery.docs.first.id;
         }
       }
-    } catch (_) {
-      // Jangan crash jika proses resolver gagal.
+    } catch (e) {
+      debugPrint('Gagal mencari ID guru: $e');
     }
 
     return null;
@@ -99,47 +114,39 @@ class _TeacherAnnouncementsScreenState
   // ============================================================
 
   Future<void> _loadTeacherProfile() async {
+    if (mounted) {
+      setState(() {
+        _loadingTeacher = true;
+      });
+    }
+
     final user = _auth.currentUser;
 
     if (user == null) {
-      if (mounted) {
-        setState(() {
-          _teacherName = 'Guru';
-          _teacherId = null;
-          _loadingTeacher = false;
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _teacherName = 'Guru';
+        _teacherId = null;
+        _loadingTeacher = false;
+      });
 
       return;
     }
 
     try {
-      // ========================================================
-      // PROFILE USER
-      // ========================================================
+      final snapshot =
+      await _firestore.collection('users').doc(user.uid).get();
 
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final data = snapshot.data() ?? {};
 
-      String teacherName = user.displayName ?? 'Guru';
-
-      if (snapshot.exists) {
-        final data = snapshot.data() ?? {};
-
-        teacherName = (
-            data['name'] ??
-                data['username'] ??
-                data['displayName'] ??
-                user.displayName ??
-                'Guru'
-        ).toString();
-      }
-
-      // ========================================================
-      // RESOLVE TEACHER ID CANONICAL
-      // ========================================================
+      final teacherName = (
+          data['name'] ??
+              data['username'] ??
+              data['displayName'] ??
+              user.displayName ??
+              'Guru'
+      ).toString();
 
       final teacherId = await _getTeacherDocumentId();
 
@@ -147,20 +154,18 @@ class _TeacherAnnouncementsScreenState
 
       setState(() {
         _teacherName =
-        teacherName.isEmpty ? 'Guru' : teacherName;
-
+        teacherName.trim().isEmpty ? 'Guru' : teacherName.trim();
         _teacherId = teacherId;
-
         _loadingTeacher = false;
       });
-    } catch (_) {
-      final teacherId = await _getTeacherDocumentId();
+    } catch (e) {
+      debugPrint('Gagal memuat profil guru: $e');
 
       if (!mounted) return;
 
       setState(() {
         _teacherName = user.displayName ?? 'Guru';
-        _teacherId = teacherId;
+        _teacherId = null;
         _loadingTeacher = false;
       });
     }
@@ -172,24 +177,15 @@ class _TeacherAnnouncementsScreenState
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _announcementStream() {
     final user = _auth.currentUser;
-
-    if (user == null) {
-      return const Stream.empty();
-    }
-
     final teacherId = _teacherId;
 
-    if (teacherId == null || teacherId.isEmpty) {
+    if (user == null ||
+        teacherId == null ||
+        teacherId.isEmpty) {
       return const Stream.empty();
     }
 
-    // ==========================================================
-    // teacherId utama = ID document teachers
-    //
-    // Auth UID juga dimasukkan agar pengumuman lama yang
-    // terlanjur tersimpan menggunakan UID tetap dapat terlihat.
-    // ==========================================================
-
+    // Memungkinkan data lama yang menyimpan UID tetap terlihat.
     final teacherIds = <String>{
       teacherId,
       user.uid,
@@ -197,10 +193,7 @@ class _TeacherAnnouncementsScreenState
 
     return _firestore
         .collection('announcements')
-        .where(
-      'teacherId',
-      whereIn: teacherIds,
-    )
+        .where('teacherId', whereIn: teacherIds)
         .snapshots();
   }
 
@@ -212,6 +205,17 @@ class _TeacherAnnouncementsScreenState
     String? announcementId,
     Map<String, dynamic>? data,
   }) async {
+    if (_teacherId == null || _teacherId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Data guru tidak ditemukan. Silakan periksa akun Anda.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -245,6 +249,17 @@ class _TeacherAnnouncementsScreenState
       String announcementId,
       String title,
       ) async {
+    if (_teacherId == null || _teacherId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Data guru tidak ditemukan. Pengumuman tidak dapat dihapus.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -260,9 +275,7 @@ class _TeacherAnnouncementsScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Pengumuman berhasil dihapus.',
-          ),
+          content: Text('Pengumuman berhasil dihapus.'),
         ),
       );
     }
@@ -285,16 +298,19 @@ class _TeacherAnnouncementsScreenState
         actions: [
           IconButton(
             tooltip: 'Tambah Pengumuman',
-            onPressed: () => _openAnnouncementForm(),
+            onPressed: _loadingTeacher
+                ? null
+                : () => _openAnnouncementForm(),
             icon: const Icon(Icons.add),
           ),
         ],
       ),
-
       body: _loadingTeacher
           ? const Center(
         child: CircularProgressIndicator(),
       )
+          : _teacherId == null
+          ? _buildTeacherNotFound()
           : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: _announcementStream(),
         builder: (context, snapshot) {
@@ -311,22 +327,16 @@ class _TeacherAnnouncementsScreenState
             );
           }
 
-          final docs =
-              snapshot.data?.docs.toList() ?? [];
+          final docs = snapshot.data?.docs.toList() ?? [];
 
           // Pengumuman terbaru di atas.
           docs.sort((a, b) {
-            final aTimestamp =
-            a.data()['createdAt'];
-
-            final bTimestamp =
-            b.data()['createdAt'];
+            final aTimestamp = a.data()['createdAt'];
+            final bTimestamp = b.data()['createdAt'];
 
             if (aTimestamp is Timestamp &&
                 bTimestamp is Timestamp) {
-              return bTimestamp.compareTo(
-                aTimestamp,
-              );
+              return bTimestamp.compareTo(aTimestamp);
             }
 
             return 0;
@@ -337,9 +347,7 @@ class _TeacherAnnouncementsScreenState
           }
 
           return RefreshIndicator(
-            onRefresh: () async {
-              await _loadTeacherProfile();
-            },
+            onRefresh: _loadTeacherProfile,
             child: ListView.builder(
               physics:
               const AlwaysScrollableScrollPhysics(),
@@ -362,14 +370,12 @@ class _TeacherAnnouncementsScreenState
           );
         },
       ),
-
-      floatingActionButton:
-      FloatingActionButton.extended(
-        onPressed: () => _openAnnouncementForm(),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _loadingTeacher
+            ? null
+            : () => _openAnnouncementForm(),
         icon: const Icon(Icons.add),
-        label: const Text(
-          'Tambah Pengumuman',
-        ),
+        label: const Text('Tambah Pengumuman'),
       ),
     );
   }
@@ -382,105 +388,83 @@ class _TeacherAnnouncementsScreenState
       String announcementId,
       Map<String, dynamic> data,
       ) {
-    final title =
-    (data['title'] ?? 'Pengumuman').toString();
+    final title = (data['title'] ?? 'Pengumuman').toString();
 
-    final content =
-    (data['content'] ??
-        data['description'] ??
-        '')
-        .toString();
+    final content = (
+        data['content'] ??
+            data['description'] ??
+            ''
+    ).toString();
 
-    final classId =
-    (data['classId'] ?? '').toString();
+    final classId = (data['classId'] ?? '').toString();
 
-    final courseName =
-    (data['courseName'] ??
-        data['courseTitle'] ??
-        '')
-        .toString();
+    final courseName = (
+        data['courseName'] ??
+            data['courseTitle'] ??
+            ''
+    ).toString();
 
-    final priority =
-    (data['priority'] ?? 'Normal').toString();
+    final priority = (data['priority'] ?? 'Normal').toString();
 
-    final priorityColor =
-    _priorityColor(priority);
+    final priorityColor = _priorityColor(priority);
 
     return Card(
-      margin: const EdgeInsets.only(
-        bottom: 14,
-      ),
+      margin: const EdgeInsets.only(bottom: 14),
       elevation: 1,
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: 50,
                   height: 50,
                   decoration: BoxDecoration(
-                    color:
-                    priorityColor.withValues(
-                      alpha: 0.1,
-                    ),
-                    borderRadius:
-                    BorderRadius.circular(14),
+                    color: priorityColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(
                     Icons.campaign_outlined,
                     color: priorityColor,
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         title,
                         maxLines: 2,
-                        overflow:
-                        TextOverflow.ellipsis,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 17,
-                          fontWeight:
-                          FontWeight.bold,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 5),
                       Text(
                         _teacherName,
                         style: TextStyle(
-                          color:
-                          Colors.grey.shade600,
+                          color: Colors.grey.shade600,
                           fontSize: 13,
                         ),
                       ),
                     ],
                   ),
                 ),
-
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'edit') {
                       _openAnnouncementForm(
-                        announcementId:
-                        announcementId,
+                        announcementId: announcementId,
                         data: data,
                       );
-                    }
-
-                    if (value == 'delete') {
+                    } else if (value == 'delete') {
                       _openDeleteAnnouncement(
                         announcementId,
                         title,
@@ -493,9 +477,7 @@ class _TeacherAnnouncementsScreenState
                         value: 'edit',
                         child: Row(
                           children: [
-                            Icon(
-                              Icons.edit_outlined,
-                            ),
+                            Icon(Icons.edit_outlined),
                             SizedBox(width: 10),
                             Text('Edit'),
                           ],
@@ -512,9 +494,7 @@ class _TeacherAnnouncementsScreenState
                             SizedBox(width: 10),
                             Text(
                               'Hapus',
-                              style: TextStyle(
-                                color: Colors.red,
-                              ),
+                              style: TextStyle(color: Colors.red),
                             ),
                           ],
                         ),
@@ -524,87 +504,64 @@ class _TeacherAnnouncementsScreenState
                 ),
               ],
             ),
-
             const SizedBox(height: 14),
-
             Container(
-              padding:
-              const EdgeInsets.symmetric(
+              padding: const EdgeInsets.symmetric(
                 horizontal: 10,
                 vertical: 6,
               ),
               decoration: BoxDecoration(
-                color:
-                priorityColor.withValues(
-                  alpha: 0.1,
-                ),
-                borderRadius:
-                BorderRadius.circular(8),
+                color: priorityColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 'Prioritas: $priority',
                 style: TextStyle(
                   color: priorityColor,
                   fontSize: 12,
-                  fontWeight:
-                  FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-
             if (content.isNotEmpty) ...[
               const SizedBox(height: 14),
               Text(
                 content,
                 maxLines: 4,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color:
-                  Colors.grey.shade700,
+                  color: Colors.grey.shade700,
                   height: 1.45,
                 ),
               ),
             ],
-
             const SizedBox(height: 14),
-
-            const Divider(
-              height: 1,
-            ),
-
+            const Divider(height: 1),
             const SizedBox(height: 14),
-
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 if (classId.isNotEmpty)
                   _buildInfoChip(
-                    icon:
-                    Icons.class_outlined,
+                    icon: Icons.class_outlined,
                     text: classId,
                   ),
                 if (courseName.isNotEmpty)
                   _buildInfoChip(
-                    icon:
-                    Icons.school_outlined,
+                    icon: Icons.school_outlined,
                     text: courseName,
                   ),
               ],
             ),
-
             const SizedBox(height: 14),
-
             Row(
               children: [
                 Expanded(
-                  child:
-                  OutlinedButton.icon(
+                  child: OutlinedButton.icon(
                     onPressed: () {
                       _openAnnouncementForm(
-                        announcementId:
-                        announcementId,
+                        announcementId: announcementId,
                         data: data,
                       );
                     },
@@ -612,25 +569,16 @@ class _TeacherAnnouncementsScreenState
                       Icons.edit_outlined,
                       size: 18,
                     ),
-                    label:
-                    const Text('Edit'),
+                    label: const Text('Edit'),
                   ),
                 ),
-
                 const SizedBox(width: 10),
-
                 Expanded(
-                  child:
-                  OutlinedButton.icon(
-                    style:
-                    OutlinedButton.styleFrom(
-                      foregroundColor:
-                      Colors.red,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
                       side: BorderSide(
-                        color:
-                        Colors.red.withValues(
-                          alpha: 0.5,
-                        ),
+                        color: Colors.red.withValues(alpha: 0.5),
                       ),
                     ),
                     onPressed: () {
@@ -643,8 +591,7 @@ class _TeacherAnnouncementsScreenState
                       Icons.delete_outline,
                       size: 18,
                     ),
-                    label:
-                    const Text('Hapus'),
+                    label: const Text('Hapus'),
                   ),
                 ),
               ],
@@ -663,10 +610,8 @@ class _TeacherAnnouncementsScreenState
     switch (priority) {
       case 'Tinggi':
         return Colors.red;
-
       case 'Rendah':
         return Colors.blue;
-
       case 'Normal':
       default:
         return Colors.orange;
@@ -682,37 +627,29 @@ class _TeacherAnnouncementsScreenState
     required String text,
   }) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: 10,
         vertical: 7,
       ),
       decoration: BoxDecoration(
-        color: Colors.grey.withValues(
-          alpha: 0.08,
-        ),
-        borderRadius:
-        BorderRadius.circular(10),
+        color: Colors.grey.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
-        mainAxisSize:
-        MainAxisSize.min,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             icon,
             size: 16,
-            color:
-            Colors.grey.shade700,
+            color: Colors.grey.shade700,
           ),
           const SizedBox(width: 6),
           Text(
             text,
             style: TextStyle(
               fontSize: 12,
-              color:
-              Colors.grey.shade700,
-              fontWeight:
-              FontWeight.w500,
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -727,11 +664,9 @@ class _TeacherAnnouncementsScreenState
   Widget _buildEmpty() {
     return Center(
       child: Padding(
-        padding:
-        const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 90,
@@ -740,54 +675,82 @@ class _TeacherAnnouncementsScreenState
                 color: Theme.of(context)
                     .colorScheme
                     .primary
-                    .withValues(
-                  alpha: 0.08,
-                ),
+                    .withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.campaign_outlined,
                 size: 44,
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary,
+                color: Theme.of(context).colorScheme.primary,
               ),
             ),
-
             const SizedBox(height: 20),
-
             const Text(
               'Belum Ada Pengumuman',
               style: TextStyle(
                 fontSize: 20,
-                fontWeight:
-                FontWeight.bold,
+                fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'Belum ada pengumuman yang dibuat.',
-              textAlign:
-              TextAlign.center,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color:
-                Colors.grey.shade600,
+                color: Colors.grey.shade600,
               ),
             ),
-
             const SizedBox(height: 22),
-
             FilledButton.icon(
-              onPressed: () =>
-                  _openAnnouncementForm(),
-              icon: const Icon(
-                Icons.add,
+              onPressed: () => _openAnnouncementForm(),
+              icon: const Icon(Icons.add),
+              label: const Text('Tambah Pengumuman'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // TEACHER NOT FOUND
+  // ============================================================
+
+  Widget _buildTeacherNotFound() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.person_search_outlined,
+              size: 52,
+              color: Colors.orange.shade600,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Data Guru Tidak Ditemukan',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
-              label: const Text(
-                'Tambah Pengumuman',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Profil guru belum terhubung dengan akun ini. '
+                  'Silakan muat ulang atau periksa data guru di Firestore.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey.shade600,
               ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: _loadTeacherProfile,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Coba Lagi'),
             ),
           ],
         ),
@@ -802,54 +765,36 @@ class _TeacherAnnouncementsScreenState
   Widget _buildError(String error) {
     return Center(
       child: Padding(
-        padding:
-        const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               Icons.error_outline,
               size: 52,
-              color:
-              Colors.red.shade400,
+              color: Colors.red.shade400,
             ),
-
             const SizedBox(height: 16),
-
             const Text(
               'Gagal Memuat Pengumuman',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight:
-                FontWeight.bold,
+                fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               error,
-              textAlign:
-              TextAlign.center,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color:
-                Colors.grey.shade600,
+                color: Colors.grey.shade600,
               ),
             ),
-
             const SizedBox(height: 20),
-
             FilledButton.icon(
-              onPressed: () {
-                _loadTeacherProfile();
-              },
-              icon: const Icon(
-                Icons.refresh,
-              ),
-              label: const Text(
-                'Coba Lagi',
-              ),
+              onPressed: _loadTeacherProfile,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Coba Lagi'),
             ),
           ],
         ),

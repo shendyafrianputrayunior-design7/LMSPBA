@@ -18,8 +18,7 @@ class TeacherDiscussionDeleteScreen extends StatefulWidget {
 
 class _TeacherDiscussionDeleteScreenState
     extends State<TeacherDiscussionDeleteScreen> {
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _deleting = false;
 
@@ -29,12 +28,39 @@ class _TeacherDiscussionDeleteScreenState
     });
 
     try {
-      await _firestore
+      final discussionRef = _firestore
           .collection('discussions')
-          .doc(widget.discussionId)
-          .delete();
+          .doc(widget.discussionId);
+
+      // Pastikan dokumen diskusi masih tersedia.
+      final discussionSnapshot = await discussionRef.get();
+
+      if (!discussionSnapshot.exists) {
+        if (!mounted) return;
+
+        setState(() {
+          _deleting = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Diskusi sudah tidak tersedia.'),
+          ),
+        );
+        return;
+      }
+
+      // Hapus dokumen diskusi.
+      await discussionRef.delete();
 
       if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Diskusi berhasil dihapus.'),
+          backgroundColor: Colors.green,
+        ),
+      );
 
       Navigator.pop(context, true);
     } catch (e) {
@@ -46,11 +72,47 @@ class _TeacherDiscussionDeleteScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Gagal menghapus diskusi: $e',
-          ),
+          content: Text('Gagal menghapus diskusi: $e'),
+          backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Konfirmasi Penghapusan'),
+          content: Text(
+            'Apakah kamu yakin ingin menghapus diskusi '
+                '"${widget.title}"?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Ya, Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true && mounted) {
+      await _deleteDiscussion();
     }
   }
 
@@ -77,8 +139,7 @@ class _TeacherDiscussionDeleteScreenState
                       width: 72,
                       height: 72,
                       decoration: BoxDecoration(
-                        color:
-                        Colors.red.withValues(alpha: 0.1),
+                        color: Colors.red.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
@@ -114,11 +175,8 @@ class _TeacherDiscussionDeleteScreenState
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.grey.withValues(
-                          alpha: 0.08,
-                        ),
-                        borderRadius:
-                        BorderRadius.circular(12),
+                        color: Colors.grey.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         widget.title,
@@ -136,9 +194,7 @@ class _TeacherDiscussionDeleteScreenState
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton.icon(
-                        onPressed: _deleting
-                            ? null
-                            : _deleteDiscussion,
+                        onPressed: _deleting ? null : _confirmDelete,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
                           foregroundColor: Colors.white,
@@ -147,8 +203,7 @@ class _TeacherDiscussionDeleteScreenState
                             ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child:
-                          CircularProgressIndicator(
+                          child: CircularProgressIndicator(
                             color: Colors.white,
                             strokeWidth: 2,
                           ),

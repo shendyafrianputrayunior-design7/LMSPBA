@@ -23,8 +23,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // ID guru standar di seluruh sistem
-  static const String _teacherId = 'teacher_001';
+  String? get _teacherId => _auth.currentUser?.uid;
 
   final _formKey = GlobalKey<FormState>();
 
@@ -44,7 +43,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
 
   String? _selectedCourseId;
   String? _selectedCourseName;
-
   String? _selectedClassId;
   String? _selectedClassName;
 
@@ -82,32 +80,18 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       text: (data?['duration'] ?? '60').toString(),
     );
 
-    // Data lama ketika edit
-    final oldCourseId = (data?['courseId'] ?? '').toString();
-    final oldCourseName = (
-        data?['courseName'] ??
-            data?['courseTitle'] ??
-            ''
-    ).toString();
+    _selectedCourseId = (data?['courseId'] ?? '').toString().isEmpty
+        ? null
+        : data!['courseId'].toString();
 
-    final oldClassId = (data?['classId'] ?? '').toString();
-    final oldClassName = (data?['className'] ?? '').toString();
+    _selectedCourseName =
+        (data?['courseName'] ?? data?['courseTitle'] ?? '').toString();
 
-    if (oldCourseId.isNotEmpty) {
-      _selectedCourseId = oldCourseId;
-    }
+    _selectedClassId = (data?['classId'] ?? '').toString().isEmpty
+        ? null
+        : data!['classId'].toString();
 
-    if (oldCourseName.isNotEmpty) {
-      _selectedCourseName = oldCourseName;
-    }
-
-    if (oldClassId.isNotEmpty) {
-      _selectedClassId = oldClassId;
-    }
-
-    if (oldClassName.isNotEmpty) {
-      _selectedClassName = oldClassName;
-    }
+    _selectedClassName = (data?['className'] ?? '').toString();
 
     _loadData();
   }
@@ -121,7 +105,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
     _endTimeController.dispose();
     _roomController.dispose();
     _durationController.dispose();
-
     super.dispose();
   }
 
@@ -130,158 +113,96 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   // ============================================================
 
   Future<void> _loadData() async {
+    final teacherId = _teacherId;
+
+    if (teacherId == null) {
+      if (!mounted) return;
+
+      setState(() => _loadingData = false);
+      _showMessage('Silakan login terlebih dahulu.');
+      return;
+    }
+
     try {
       final results = await Future.wait([
-        // ======================================================
-        // COURSE
-        // ======================================================
         _firestore
             .collection('courses')
-            .where(
-          'teacherId',
-          isEqualTo: _teacherId,
-        )
+            .where('teacherId', isEqualTo: teacherId)
             .get(),
-
-        // ======================================================
-        // CLASS
-        // ======================================================
-        _firestore
-            .collection('classes')
-            .get(),
+        _firestore.collection('classes').get(),
       ]);
 
       final courseSnapshot =
       results[0] as QuerySnapshot<Map<String, dynamic>>;
-
       final classSnapshot =
       results[1] as QuerySnapshot<Map<String, dynamic>>;
 
       final courses = courseSnapshot.docs.toList();
       final classes = classSnapshot.docs.toList();
 
-      // ========================================================
-      // SORT COURSE
-      // ========================================================
-
       courses.sort((a, b) {
-        final dataA = a.data();
-        final dataB = b.data();
-
-        final nameA = (
-            dataA['title'] ??
-                dataA['courseTitle'] ??
-                dataA['name'] ??
-                ''
-        ).toString().toLowerCase();
-
-        final nameB = (
-            dataB['title'] ??
-                dataB['courseTitle'] ??
-                dataB['name'] ??
-                ''
-        ).toString().toLowerCase();
-
+        final nameA = _courseName(a.data()).toLowerCase();
+        final nameB = _courseName(b.data()).toLowerCase();
         return nameA.compareTo(nameB);
       });
-
-      // ========================================================
-      // SORT CLASS
-      // ========================================================
 
       classes.sort((a, b) {
-        final dataA = a.data();
-        final dataB = b.data();
-
-        final nameA = (
-            dataA['name'] ??
-                dataA['className'] ??
-                a.id
-        ).toString().toLowerCase();
-
-        final nameB = (
-            dataB['name'] ??
-                dataB['className'] ??
-                b.id
-        ).toString().toLowerCase();
-
+        final nameA = _className(a.data(), a.id).toLowerCase();
+        final nameB = _className(b.data(), b.id).toLowerCase();
         return nameA.compareTo(nameB);
       });
-
-      if (!mounted) return;
-
-      // ========================================================
-      // VALIDASI COURSE LAMA
-      // ========================================================
 
       String? validCourseId;
       String? validCourseName;
 
-      if (_selectedCourseId != null) {
-        for (final course in courses) {
-          if (course.id == _selectedCourseId) {
-            final data = course.data();
-
-            validCourseId = course.id;
-            validCourseName = (
-                data['title'] ??
-                    data['courseTitle'] ??
-                    data['name'] ??
-                    ''
-            ).toString();
-
-            break;
-          }
+      for (final course in courses) {
+        if (course.id == _selectedCourseId) {
+          validCourseId = course.id;
+          validCourseName = _courseName(course.data());
+          break;
         }
       }
-
-      // ========================================================
-      // VALIDASI CLASS LAMA
-      // ========================================================
 
       String? validClassId;
       String? validClassName;
 
-      if (_selectedClassId != null) {
-        for (final classDoc in classes) {
-          if (classDoc.id == _selectedClassId) {
-            final data = classDoc.data();
-
-            validClassId = classDoc.id;
-            validClassName = (
-                data['name'] ??
-                    data['className'] ??
-                    classDoc.id
-            ).toString();
-
-            break;
-          }
+      for (final classDoc in classes) {
+        if (classDoc.id == _selectedClassId) {
+          validClassId = classDoc.id;
+          validClassName = _className(classDoc.data(), classDoc.id);
+          break;
         }
       }
+
+      if (!mounted) return;
 
       setState(() {
         _courses = courses;
         _classes = classes;
-
         _selectedCourseId = validCourseId;
         _selectedCourseName = validCourseName;
-
         _selectedClassId = validClassId;
         _selectedClassName = validClassName;
-
         _loadingData = false;
       });
     } catch (e) {
       if (!mounted) return;
 
-      setState(() {
-        _loadingData = false;
-      });
-
-      _showMessage(
-        'Gagal mengambil data:\n$e',
-      );
+      setState(() => _loadingData = false);
+      _showMessage('Gagal mengambil data:\n$e');
     }
+  }
+
+  String _courseName(Map<String, dynamic> data) {
+    return (data['title'] ??
+        data['courseTitle'] ??
+        data['name'] ??
+        'Tanpa Nama Course')
+        .toString();
+  }
+
+  String _className(Map<String, dynamic> data, String id) {
+    return (data['name'] ?? data['className'] ?? id).toString();
   }
 
   // ============================================================
@@ -294,33 +215,18 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
         _selectedCourseId = null;
         _selectedCourseName = null;
       });
-
       return;
     }
 
-    QueryDocumentSnapshot<Map<String, dynamic>>? selectedCourse;
-
     for (final course in _courses) {
       if (course.id == courseId) {
-        selectedCourse = course;
-        break;
+        setState(() {
+          _selectedCourseId = course.id;
+          _selectedCourseName = _courseName(course.data());
+        });
+        return;
       }
     }
-
-    if (selectedCourse == null) return;
-
-    final data = selectedCourse.data();
-
-    setState(() {
-      _selectedCourseId = selectedCourse!.id;
-
-      _selectedCourseName = (
-          data['title'] ??
-              data['courseTitle'] ??
-              data['name'] ??
-              ''
-      ).toString();
-    });
   }
 
   // ============================================================
@@ -333,32 +239,19 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
         _selectedClassId = null;
         _selectedClassName = null;
       });
-
       return;
     }
 
-    QueryDocumentSnapshot<Map<String, dynamic>>? selectedClass;
-
     for (final classDoc in _classes) {
       if (classDoc.id == classId) {
-        selectedClass = classDoc;
-        break;
+        setState(() {
+          _selectedClassId = classDoc.id;
+          _selectedClassName =
+              _className(classDoc.data(), classDoc.id);
+        });
+        return;
       }
     }
-
-    if (selectedClass == null) return;
-
-    final data = selectedClass.data();
-
-    setState(() {
-      _selectedClassId = selectedClass!.id;
-
-      _selectedClassName = (
-          data['name'] ??
-              data['className'] ??
-              selectedClass.id
-      ).toString();
-    });
   }
 
   // ============================================================
@@ -366,119 +259,116 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   // ============================================================
 
   Future<void> _saveExam() async {
-    if (!_formKey.currentState!.validate()) {
+    if (_saving) return;
+
+    if (!_formKey.currentState!.validate()) return;
+
+    final teacherId = _teacherId;
+
+    if (teacherId == null) {
+      _showMessage('Akun guru tidak ditemukan. Silakan login kembali.');
       return;
     }
 
-    if (_selectedCourseId == null ||
-        _selectedCourseId!.isEmpty) {
-      _showMessage(
-        'Silakan pilih course terlebih dahulu.',
-      );
+    if (_selectedCourseId == null || _selectedCourseId!.isEmpty) {
+      _showMessage('Silakan pilih course terlebih dahulu.');
       return;
     }
 
-    if (_selectedClassId == null ||
-        _selectedClassId!.isEmpty) {
-      _showMessage(
-        'Silakan pilih kelas terlebih dahulu.',
-      );
+    if (_selectedClassId == null || _selectedClassId!.isEmpty) {
+      _showMessage('Silakan pilih kelas terlebih dahulu.');
       return;
     }
 
-    final user = _auth.currentUser;
+    final duration = int.tryParse(_durationController.text.trim());
 
-    if (user == null) {
-      _showMessage(
-        'Akun guru tidak ditemukan.',
-      );
+    if (duration == null || duration <= 0) {
+      _showMessage('Durasi harus lebih dari 0 menit.');
       return;
     }
 
-    setState(() {
-      _saving = true;
-    });
+    final start = _parseTime(_startTimeController.text);
+    final end = _parseTime(_endTimeController.text);
+
+    if (end.hour * 60 + end.minute <= start.hour * 60 + start.minute) {
+      _showMessage('Jam selesai harus setelah jam mulai.');
+      return;
+    }
+
+    setState(() => _saving = true);
 
     try {
-      // ========================================================
-      // DATA GURU
-      // ========================================================
+      final examCollection = _firestore.collection('exams');
 
-      final teacherDoc = await _firestore
-          .collection('users')
-          .doc(user.uid)
+      // Periksa kepemilikan saat mengedit ujian.
+      if (widget.examId != null) {
+        final existingExam =
+        await examCollection.doc(widget.examId).get();
+
+        if (!existingExam.exists) {
+          throw Exception('Dokumen ujian tidak ditemukan.');
+        }
+
+        final existingData = existingExam.data();
+
+        if (existingData == null ||
+            existingData['teacherId']?.toString() != teacherId) {
+          throw Exception('Anda tidak memiliki akses untuk mengubah ujian ini.');
+        }
+      }
+
+      // Pastikan course yang dipilih memang milik guru.
+      final courseSnapshot = await _firestore
+          .collection('courses')
+          .doc(_selectedCourseId)
           .get();
+
+      if (!courseSnapshot.exists) {
+        throw Exception('Course yang dipilih tidak ditemukan.');
+      }
+
+      final courseData = courseSnapshot.data();
+
+      if (courseData == null ||
+          courseData['teacherId']?.toString() != teacherId) {
+        throw Exception('Course tersebut bukan milik Anda.');
+      }
+
+      // Ambil nama guru dari profil, jika tersedia.
+      final teacherDoc =
+      await _firestore.collection('users').doc(teacherId).get();
 
       final teacherData = teacherDoc.data();
 
-      final teacherName = (
-          teacherData?['name'] ??
-              teacherData?['username'] ??
-              teacherData?['displayName'] ??
-              user.displayName ??
-              'Guru'
-      ).toString();
-
-      // ========================================================
-      // DATA UJIAN
-      // ========================================================
+      final teacherName = (teacherData?['name'] ??
+          teacherData?['username'] ??
+          teacherData?['displayName'] ??
+          _auth.currentUser?.displayName ??
+          'Guru')
+          .toString();
 
       final data = <String, dynamic>{
-        // GURU
-        'teacherId': _teacherId,
+        'teacherId': teacherId,
         'teacherName': teacherName,
-
-        // UJIAN
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
-
-        // COURSE
         'courseId': _selectedCourseId,
         'courseName': _selectedCourseName ?? '',
-
-        // KELAS
         'classId': _selectedClassId,
         'className': _selectedClassName ?? '',
-
-        // JADWAL
         'date': _dateController.text.trim(),
         'startTime': _startTimeController.text.trim(),
         'endTime': _endTimeController.text.trim(),
-
-        // RUANGAN
         'room': _roomController.text.trim(),
-
-        // DURASI
-        'duration': int.tryParse(
-          _durationController.text.trim(),
-        ) ??
-            60,
-
+        'duration': duration,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // ========================================================
-      // TAMBAH
-      // ========================================================
-
       if (widget.examId == null) {
-        data['createdAt'] =
-            FieldValue.serverTimestamp();
-
-        await _firestore
-            .collection('exams')
-            .add(data);
-      }
-
-      // ========================================================
-      // EDIT
-      // ========================================================
-
-      else {
-        await _firestore
-            .collection('exams')
-            .doc(widget.examId)
-            .update(data);
+        data['createdAt'] = FieldValue.serverTimestamp();
+        await examCollection.add(data);
+      } else {
+        await examCollection.doc(widget.examId).update(data);
       }
 
       if (!mounted) return;
@@ -487,13 +377,11 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      setState(() {
-        _saving = false;
-      });
-
-      _showMessage(
-        'Gagal menyimpan ujian:\n$e',
-      );
+      _showMessage('Gagal menyimpan ujian:\n$e');
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -502,10 +390,10 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   // ============================================================
 
   void _showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-      ),
+      SnackBar(content: Text(message)),
     );
   }
 
@@ -517,7 +405,6 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
     DateTime initialDate = DateTime.now();
 
     final currentText = _dateController.text.trim();
-
     final parts = currentText.split('/');
 
     if (parts.length == 3) {
@@ -525,17 +412,17 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       final month = int.tryParse(parts[1]);
       final year = int.tryParse(parts[2]);
 
-      if (day != null &&
-          month != null &&
-          year != null) {
-        final parsed = DateTime.tryParse(
-          '$year-'
-              '${month.toString().padLeft(2, '0')}-'
-              '${day.toString().padLeft(2, '0')}',
-        );
+      if (day != null && month != null && year != null) {
+        try {
+          final parsed = DateTime(year, month, day);
 
-        if (parsed != null) {
-          initialDate = parsed;
+          if (parsed.year == year &&
+              parsed.month == month &&
+              parsed.day == day) {
+            initialDate = parsed;
+          }
+        } catch (_) {
+          // Gunakan tanggal hari ini jika tanggal lama tidak valid.
         }
       }
     }
@@ -547,14 +434,14 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       lastDate: DateTime(2100),
     );
 
-    if (selectedDate == null) {
-      return;
-    }
+    if (selectedDate == null || !mounted) return;
 
-    _dateController.text =
-    '${selectedDate.day.toString().padLeft(2, '0')}/'
-        '${selectedDate.month.toString().padLeft(2, '0')}/'
-        '${selectedDate.year}';
+    setState(() {
+      _dateController.text =
+      '${selectedDate.day.toString().padLeft(2, '0')}/'
+          '${selectedDate.month.toString().padLeft(2, '0')}/'
+          '${selectedDate.year}';
+    });
   }
 
   // ============================================================
@@ -564,29 +451,27 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
   Future<void> _selectStartTime() async {
     final selected = await showTimePicker(
       context: context,
-      initialTime: _parseTime(
-        _startTimeController.text,
-      ),
+      initialTime: _parseTime(_startTimeController.text),
     );
 
-    if (selected == null) return;
+    if (selected == null || !mounted) return;
 
-    _startTimeController.text =
-        _formatTime(selected);
+    setState(() {
+      _startTimeController.text = _formatTime(selected);
+    });
   }
 
   Future<void> _selectEndTime() async {
     final selected = await showTimePicker(
       context: context,
-      initialTime: _parseTime(
-        _endTimeController.text,
-      ),
+      initialTime: _parseTime(_endTimeController.text),
     );
 
-    if (selected == null) return;
+    if (selected == null || !mounted) return;
 
-    _endTimeController.text =
-        _formatTime(selected);
+    setState(() {
+      _endTimeController.text = _formatTime(selected);
+    });
   }
 
   TimeOfDay _parseTime(String value) {
@@ -602,17 +487,11 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
           hour <= 23 &&
           minute >= 0 &&
           minute <= 59) {
-        return TimeOfDay(
-          hour: hour,
-          minute: minute,
-        );
+        return TimeOfDay(hour: hour, minute: minute);
       }
     }
 
-    return const TimeOfDay(
-      hour: 7,
-      minute: 0,
-    );
+    return const TimeOfDay(hour: 7, minute: 0);
   }
 
   String _formatTime(TimeOfDay time) {
@@ -658,9 +537,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       return InputDecorator(
         decoration: const InputDecoration(
           labelText: 'Course',
-          prefixIcon: Icon(
-            Icons.book_outlined,
-          ),
+          prefixIcon: Icon(Icons.book_outlined),
         ),
         child: const SizedBox(
           height: 24,
@@ -669,9 +546,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
             child: SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
           ),
         ),
@@ -682,9 +557,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       return InputDecorator(
         decoration: const InputDecoration(
           labelText: 'Course',
-          prefixIcon: Icon(
-            Icons.book_outlined,
-          ),
+          prefixIcon: Icon(Icons.book_outlined),
         ),
         child: const Text(
           'Belum ada course yang ditugaskan kepada Anda.',
@@ -692,9 +565,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       );
     }
 
-    // Pastikan nilai awal memang ada di daftar course.
-    final validCourseId =
-    _courses.any(
+    final validCourseId = _courses.any(
           (course) => course.id == _selectedCourseId,
     )
         ? _selectedCourseId
@@ -705,35 +576,22 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Course',
-        prefixIcon: Icon(
-          Icons.book_outlined,
-        ),
+        prefixIcon: Icon(Icons.book_outlined),
       ),
       items: _courses.map((course) {
-        final data = course.data();
-
-        final name = (
-            data['title'] ??
-                data['courseTitle'] ??
-                data['name'] ??
-                'Tanpa Nama Course'
-        ).toString();
-
         return DropdownMenuItem<String>(
           value: course.id,
           child: Text(
-            name,
+            _courseName(course.data()),
             overflow: TextOverflow.ellipsis,
           ),
         );
       }).toList(),
-      onChanged:
-      _saving ? null : _onCourseChanged,
+      onChanged: _saving ? null : _onCourseChanged,
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Course wajib dipilih';
         }
-
         return null;
       },
     );
@@ -748,9 +606,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       return InputDecorator(
         decoration: const InputDecoration(
           labelText: 'Kelas',
-          prefixIcon: Icon(
-            Icons.groups_outlined,
-          ),
+          prefixIcon: Icon(Icons.groups_outlined),
         ),
         child: const SizedBox(
           height: 24,
@@ -759,9 +615,7 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
             child: SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
           ),
         ),
@@ -772,18 +626,13 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       return InputDecorator(
         decoration: const InputDecoration(
           labelText: 'Kelas',
-          prefixIcon: Icon(
-            Icons.groups_outlined,
-          ),
+          prefixIcon: Icon(Icons.groups_outlined),
         ),
-        child: const Text(
-          'Belum ada data kelas.',
-        ),
+        child: const Text('Belum ada data kelas.'),
       );
     }
 
-    final validClassId =
-    _classes.any(
+    final validClassId = _classes.any(
           (classDoc) => classDoc.id == _selectedClassId,
     )
         ? _selectedClassId
@@ -794,34 +643,22 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Kelas',
-        prefixIcon: Icon(
-          Icons.groups_outlined,
-        ),
+        prefixIcon: Icon(Icons.groups_outlined),
       ),
       items: _classes.map((classDoc) {
-        final data = classDoc.data();
-
-        final name = (
-            data['name'] ??
-                data['className'] ??
-                classDoc.id
-        ).toString();
-
         return DropdownMenuItem<String>(
           value: classDoc.id,
           child: Text(
-            name,
+            _className(classDoc.data(), classDoc.id),
             overflow: TextOverflow.ellipsis,
           ),
         );
       }).toList(),
-      onChanged:
-      _saving ? null : _onClassChanged,
+      onChanged: _saving ? null : _onClassChanged,
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Kelas wajib dipilih';
         }
-
         return null;
       },
     );
@@ -836,54 +673,37 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isEdit
-              ? 'Edit Ujian'
-              : 'Tambah Ujian',
+          widget.isEdit ? 'Edit Ujian' : 'Tambah Ujian',
         ),
       ),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            16,
-            16,
-            32,
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
             _buildField(
               controller: _titleController,
               label: 'Judul Ujian',
               icon: Icons.school_outlined,
               validator: (value) {
-                if (value == null ||
-                    value.trim().isEmpty) {
+                if (value == null || value.trim().isEmpty) {
                   return 'Judul ujian wajib diisi';
                 }
-
                 return null;
               },
             ),
-
             const SizedBox(height: 16),
-
             _buildField(
               controller: _descriptionController,
               label: 'Deskripsi',
               icon: Icons.description_outlined,
               maxLines: 4,
             ),
-
             const SizedBox(height: 16),
-
             _buildCourseDropdown(),
-
             const SizedBox(height: 16),
-
             _buildClassDropdown(),
-
             const SizedBox(height: 16),
-
             _buildField(
               controller: _dateController,
               label: 'Tanggal',
@@ -891,116 +711,81 @@ class _TeacherExamFormScreenState extends State<TeacherExamFormScreen> {
               readOnly: true,
               onTap: _selectDate,
               validator: (value) {
-                if (value == null ||
-                    value.trim().isEmpty) {
+                if (value == null || value.trim().isEmpty) {
                   return 'Tanggal wajib diisi';
                 }
-
                 return null;
               },
             ),
-
             const SizedBox(height: 16),
-
             Row(
               children: [
                 Expanded(
                   child: _buildField(
-                    controller:
-                    _startTimeController,
+                    controller: _startTimeController,
                     label: 'Jam Mulai',
-                    icon:
-                    Icons.access_time_outlined,
+                    icon: Icons.access_time_outlined,
                     readOnly: true,
-                    onTap:
-                    _selectStartTime,
+                    onTap: _selectStartTime,
                     validator: (value) {
-                      if (value == null ||
-                          value.trim().isEmpty) {
+                      if (value == null || value.trim().isEmpty) {
                         return 'Jam mulai wajib diisi';
                       }
-
                       return null;
                     },
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: _buildField(
-                    controller:
-                    _endTimeController,
+                    controller: _endTimeController,
                     label: 'Jam Selesai',
-                    icon:
-                    Icons.access_time_outlined,
+                    icon: Icons.access_time_outlined,
                     readOnly: true,
-                    onTap:
-                    _selectEndTime,
+                    onTap: _selectEndTime,
                     validator: (value) {
-                      if (value == null ||
-                          value.trim().isEmpty) {
+                      if (value == null || value.trim().isEmpty) {
                         return 'Jam selesai wajib diisi';
                       }
-
                       return null;
                     },
                   ),
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
-
             _buildField(
               controller: _roomController,
               label: 'Ruangan',
-              icon:
-              Icons.meeting_room_outlined,
+              icon: Icons.meeting_room_outlined,
             ),
-
             const SizedBox(height: 16),
-
             _buildField(
               controller: _durationController,
               label: 'Durasi (menit)',
               icon: Icons.timer_outlined,
-              keyboardType:
-              TextInputType.number,
+              keyboardType: TextInputType.number,
               validator: (value) {
-                final duration =
-                int.tryParse(
-                  value?.trim() ?? '',
-                );
+                final duration = int.tryParse(value?.trim() ?? '');
 
-                if (duration == null ||
-                    duration <= 0) {
+                if (duration == null || duration <= 0) {
                   return 'Durasi harus lebih dari 0';
                 }
-
                 return null;
               },
             ),
-
             const SizedBox(height: 28),
-
             SizedBox(
               height: 52,
               child: FilledButton.icon(
-                onPressed:
-                _saving ? null : _saveExam,
+                onPressed: _saving || _loadingData ? null : _saveExam,
                 icon: _saving
                     ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child:
-                  CircularProgressIndicator(
-                    strokeWidth: 2,
-                  ),
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 )
-                    : const Icon(
-                  Icons.save_outlined,
-                ),
+                    : const Icon(Icons.save_outlined),
                 label: Text(
                   _saving
                       ? 'Menyimpan...'
